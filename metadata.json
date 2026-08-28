@@ -1,0 +1,7 @@
+{
+  "name": "BIKIE Papelería",
+  "description": "Sistema integral de papelería BIKIE con tienda online, escaneo inteligente de listas de materiales escolares con IA, pedidos, inventario, ventas, caja y panel administrativo.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
