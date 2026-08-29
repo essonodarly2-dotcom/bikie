@@ -267,7 +267,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            {/* Staff User indicator (Only if aunt is logged in) */}
+            {/* Staff User indicator (Only if admin is logged in) */}
             {isStaff && (
               <div className="relative">
                 <div
@@ -275,14 +275,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="flex items-center gap-2 pl-2 sm:pl-3 border-l border-slate-200 cursor-pointer hover:opacity-80 transition-opacity"
                 >
                   <div className="w-8 h-8 rounded-full bg-red-100 border border-red-300 flex items-center justify-center text-red-800 text-xs font-bold uppercase shrink-0">
-                    T
+                    {currentUser.name ? currentUser.name.charAt(0) : 'M'}
                   </div>
                   <div className="hidden xl:flex flex-col text-left text-xs leading-tight">
-                    <span className="font-bold text-slate-800 truncate max-w-[100px]">
-                      Tía (Propietaria)
+                    <span className="font-bold text-slate-800 truncate max-w-[120px]">
+                      {currentUser.name || 'María Lidia'}
                     </span>
                     <span className="text-[10px] text-red-600 font-semibold">
-                      Administradora
+                      Propietaria & Admin
                     </span>
                   </div>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />

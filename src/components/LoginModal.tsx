@@ -35,7 +35,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoginSuccess,
   onLogoutToGuest,
 }) => {
-  const [email, setEmail] = useState('propietaria@bikie.gq');
+  const [email, setEmail] = useState('marialidia@bikie.gq');
   const [pin, setPin] = useState('1234');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,13 +194,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setEmail('propietaria@bikie.gq');
+                  setEmail('marialidia@bikie.gq');
                   setPin('1234');
                   setError(null);
                 }}
                 className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
               >
-                <span>👑 Propietaria (PIN: 1234)</span>
+                <span>👑 María Lidia (PIN: 1234)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('propietaria@bikie.gq');
+                  setPin('1234');
+                  setError(null);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
+              >
+                <span>💼 Propietaria (PIN: 1234)</span>
               </button>
               <button
                 type="button"
@@ -228,7 +239,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  placeholder="propietaria@bikie.gq"
+                  placeholder="marialidia@bikie.gq"
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:border-red-600 focus:ring-2 focus:ring-red-100 outline-hidden transition-all text-slate-800"
                 />
                 <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />

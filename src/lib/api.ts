@@ -36,6 +36,8 @@ export interface BootstrapData {
   cash_registers: CashRegister[];
   cash_movements: CashMovement[];
   sales: any[];
+  expenses?: any[];
+  services?: any[];
   ai_scans: AiScanRecord[];
   activity_logs: any[];
   users: UserProfile[];
@@ -74,8 +76,11 @@ class BikieApiClient {
 
       // Check against known admin accounts or stored user
       const isAdminEmail =
+        cleanEmail === 'marialidia@bikie.gq' ||
         cleanEmail === 'propietaria@bikie.gq' ||
         cleanEmail === 'admin@bikie.gq' ||
+        cleanEmail === 'marialidia' ||
+        cleanEmail === 'propietaria' ||
         cleanEmail === 'admin' ||
         (user && user.role === 'admin');
 
@@ -83,9 +88,9 @@ class BikieApiClient {
 
       if (isAdminEmail && (cleanPin === '1234' || isCorrectPin)) {
         const adminUser: UserProfile = user || {
-          id: 'usr-tia-admin-01',
-          email: cleanEmail.includes('@') ? cleanEmail : 'propietaria@bikie.gq',
-          name: cleanEmail === 'admin@bikie.gq' ? 'Administrador General BIKIE' : 'Propietaria BIKIE (Tía)',
+          id: 'usr-marialidia-01',
+          email: cleanEmail.includes('@') ? cleanEmail : 'marialidia@bikie.gq',
+          name: cleanEmail === 'admin@bikie.gq' ? 'Administrador General BIKIE' : 'María Lidia (Propietaria BIKIE)',
           phone: '+240 222 111 000',
           role: 'admin',
           points: 2500,
@@ -108,7 +113,7 @@ class BikieApiClient {
 
       return {
         success: false,
-        error: 'Usuario o contraseña incorrectos. Para la propietaria usa propietaria@bikie.gq con PIN: 1234.',
+        error: 'Usuario o contraseña incorrectos. Para la propietaria María Lidia usa marialidia@bikie.gq con PIN: 1234.',
       };
     } catch (fallbackErr) {
       return {
@@ -631,6 +636,142 @@ class BikieApiClient {
     } catch (err) {
       console.error('Error saving AI scan in DB:', err);
       return null;
+    }
+  }
+
+  // Expenses
+  async getExpenses(): Promise<any[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/expenses`);
+      return await res.json();
+    } catch (err) {
+      console.error('Error fetching expenses from DB:', err);
+      return [];
+    }
+  }
+
+  async createExpense(expense: any): Promise<any | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/expenses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(expense),
+      });
+      const data = await res.json();
+      return data.expense || null;
+    } catch (err) {
+      console.error('Error creating expense in DB:', err);
+      return null;
+    }
+  }
+
+  async updateExpense(id: string, updates: any): Promise<any | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/expenses/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      return data.expense || null;
+    } catch (err) {
+      console.error('Error updating expense in DB:', err);
+      return null;
+    }
+  }
+
+  async deleteExpense(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/expenses/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      return data.success;
+    } catch (err) {
+      console.error('Error deleting expense in DB:', err);
+      return false;
+    }
+  }
+
+  async saveExpenses(expenses: any[]): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/expenses`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(expenses),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('Error saving expenses to DB:', err);
+      return false;
+    }
+  }
+
+  // Services
+  async getServices(): Promise<any[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/services`);
+      return await res.json();
+    } catch (err) {
+      console.error('Error fetching services from DB:', err);
+      return [];
+    }
+  }
+
+  async createService(service: any): Promise<any | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/services`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(service),
+      });
+      const data = await res.json();
+      return data.service || null;
+    } catch (err) {
+      console.error('Error creating service in DB:', err);
+      return null;
+    }
+  }
+
+  async updateService(id: string, updates: any): Promise<any | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/services/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      return data.service || null;
+    } catch (err) {
+      console.error('Error updating service in DB:', err);
+      return null;
+    }
+  }
+
+  async deleteService(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/services/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      return data.success;
+    } catch (err) {
+      console.error('Error deleting service in DB:', err);
+      return false;
+    }
+  }
+
+  async saveServices(services: any[]): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/services`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(services),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('Error saving services to DB:', err);
+      return false;
     }
   }
 

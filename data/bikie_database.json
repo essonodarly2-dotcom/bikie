@@ -1,14 +1,34 @@
 {
   "users": [
     {
-      "id": "usr-admin-tia",
-      "name": "Tía Administradora (BIKIE)",
-      "email": "admin@bikie.gq",
+      "id": "usr-admin-marialidia",
+      "name": "María Lidia (Propietaria BIKIE)",
+      "email": "marialidia@bikie.gq",
       "phone": "+240 222 123 456",
       "password": "1234",
       "role": "admin",
       "points": 2500,
-      "created_at": "2026-03-01T10:09:19.558Z"
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr-admin-propietaria",
+      "name": "María Lidia",
+      "email": "propietaria@bikie.gq",
+      "phone": "+240 222 123 456",
+      "password": "1234",
+      "role": "admin",
+      "points": 2500,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr-admin-general",
+      "name": "Administrador General BIKIE",
+      "email": "admin@bikie.gq",
+      "phone": "+240 222 213 126",
+      "password": "1234",
+      "role": "admin",
+      "points": 1500,
+      "created_at": "2026-01-01T00:00:00.000Z"
     }
   ],
   "categories": [
@@ -109,7 +129,7 @@
       "purchase_price": 1600,
       "sale_price": 2500,
       "previous_price": 2800,
-      "stock": 145,
+      "stock": 143,
       "min_stock": 20,
       "status": "active",
       "is_featured": true,
@@ -122,7 +142,8 @@
         "cuadriculado",
         "A4"
       ],
-      "created_at": "2026-07-29T10:09:19.559Z"
+      "created_at": "2026-07-29T10:09:19.559Z",
+      "updated_at": "2026-08-29T11:51:49.393Z"
     },
     {
       "id": "prod-02",
@@ -137,7 +158,7 @@
       "purchase_price": 7500,
       "sale_price": 12000,
       "previous_price": 14000,
-      "stock": 42,
+      "stock": 40,
       "min_stock": 10,
       "status": "active",
       "is_featured": true,
@@ -149,7 +170,8 @@
         "escritura",
         "oficina"
       ],
-      "created_at": "2026-07-14T10:09:19.559Z"
+      "created_at": "2026-07-14T10:09:19.559Z",
+      "updated_at": "2026-08-29T11:51:49.396Z"
     },
     {
       "id": "prod-03",
@@ -245,7 +267,7 @@
       "purchase_price": 15000,
       "sale_price": 24000,
       "previous_price": 28000,
-      "stock": 35,
+      "stock": 34,
       "min_stock": 6,
       "status": "active",
       "is_featured": true,
@@ -257,7 +279,8 @@
         "impermeable",
         "escolar"
       ],
-      "created_at": "2026-08-18T10:09:19.559Z"
+      "created_at": "2026-08-18T10:09:19.559Z",
+      "updated_at": "2026-08-29T11:51:49.399Z"
     }
   ],
   "orders": [
@@ -306,7 +329,7 @@
       "description": "15% de descuento en todos los cuadernos espiral Oxford y packs escolares completos.",
       "discount_value": 15,
       "type": "percentage",
-      "status": "active",
+      "status": "paused",
       "start_date": "2026-08-01",
       "end_date": "2026-10-31",
       "product_ids": [
@@ -314,8 +337,7 @@
         "prod-06"
       ],
       "category_ids": [
-        "cat-cuadernos",
-        "cat-escolar"
+        "cat-escritura"
       ]
     }
   ],
@@ -412,7 +434,92 @@
       "created_at": "2026-05-20T10:09:19.559Z"
     }
   ],
-  "inventory_movements": [],
+  "inventory_movements": [
+    {
+      "id": "mov-1788004309253-uqba",
+      "product_id": "prod-06",
+      "product_name": "Mochila Escolar Ergonómica Reforzada BIKIE Pro 28L Impermeable",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 35,
+      "new_stock": 34,
+      "reason": "Pedido web de Tía Administradora (BIKIE)",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:51:49.253Z"
+    },
+    {
+      "id": "mov-1788004309253-2pjm",
+      "product_id": "prod-02",
+      "product_name": "Bolígrafo BIC Cristal Original Azul 1.0mm (Caja 50 uds)",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 41,
+      "new_stock": 40,
+      "reason": "Pedido web de Tía Administradora (BIKIE)",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:51:49.253Z"
+    },
+    {
+      "id": "mov-1788004309252-s1v9",
+      "product_id": "prod-01",
+      "product_name": "Cuaderno A4 Espiral Oxford OpenFlex 80h Cuadrícula 4x4",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 144,
+      "new_stock": 143,
+      "reason": "Pedido web de Tía Administradora (BIKIE)",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:51:49.252Z"
+    },
+    {
+      "id": "mov-1788003773225-ltku",
+      "product_id": "prod-01",
+      "product_name": "Cuaderno A4 Espiral Oxford OpenFlex 80h Cuadrícula 4x4",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 145,
+      "new_stock": 144,
+      "reason": "Pedido web WhatsApp de Tía Administradora (BIKIE)",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:42:53.225Z"
+    },
+    {
+      "id": "mov-1788003773225-m49h",
+      "product_id": "prod-02",
+      "product_name": "Bolígrafo BIC Cristal Original Azul 1.0mm (Caja 50 uds)",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 42,
+      "new_stock": 41,
+      "reason": "Pedido web WhatsApp de Tía Administradora (BIKIE)",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:42:53.225Z"
+    },
+    {
+      "id": "mov-1788001748470-prod-01",
+      "product_id": "prod-01",
+      "product_name": "Cuaderno A4 Espiral Oxford OpenFlex 80h Cuadrícula 4x4",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 145,
+      "new_stock": 144,
+      "reason": "Venta POS Mostrador #POS-322357",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:09:08.470Z"
+    },
+    {
+      "id": "mov-1788001748471-prod-02",
+      "product_id": "prod-02",
+      "product_name": "Bolígrafo BIC Cristal Original Azul 1.0mm (Caja 50 uds)",
+      "type": "sale",
+      "quantity": -1,
+      "previous_stock": 42,
+      "new_stock": 41,
+      "reason": "Venta POS Mostrador #POS-322357",
+      "user_name": "Tía Administradora (BIKIE)",
+      "created_at": "2026-08-29T11:09:08.471Z"
+    }
+  ],
   "cash_registers": [
     {
       "id": "reg-db-today",
@@ -436,7 +543,7 @@
     "slogan": "Todo lo que necesitas para estudiar, trabajar y crear",
     "description": "Papelería, librería, material de oficina, bellas artes y servicios escolares integrales en Malabo, Guinea Ecuatorial.",
     "phone": "+240 222 345 678",
-    "whatsapp": "+240 555 890 123",
+    "whatsapp": "+240 555 706371",
     "email": "contacto@bikie-papeleria.com",
     "address": "Avenida de la Independencia, Edificio Central, Malabo, Guinea Ecuatorial",
     "city": "Malabo",
@@ -449,6 +556,7 @@
     "free_shipping_min": 25000,
     "points_per_1000_xaf": 10,
     "facebook": "https://facebook.com/bikiepapeleria",
-    "instagram": "https://instagram.com/bikiepapeleria"
+    "instagram": "https://instagram.com/bikiepapeleria",
+    "updated_at": "2026-08-29T11:10:07.670Z"
   }
 }

@@ -370,7 +370,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
             <div className="border-t sm:border-t-0 sm:border-l border-slate-200 pt-3 sm:pt-0 sm:pl-4 text-center">
               <div className="h-10 flex items-end justify-center">
                 <span className="font-['Outfit'] text-red-600 font-bold text-xs italic">
-                  Tía Administradora BIKIE
+                  María Lidia — Propietaria BIKIE
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 uppercase font-bold border-t border-slate-300 pt-1">

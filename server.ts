@@ -441,6 +441,86 @@ app.put('/api/suppliers', (req, res) => {
 });
 
 // ==========================================
+// EXPENSES DB ENDPOINTS
+// ==========================================
+app.get('/api/expenses', (req, res) => {
+  res.json(db.getExpenses());
+});
+
+app.post('/api/expenses', (req, res) => {
+  try {
+    const expense = db.createExpense(req.body);
+    res.json({ success: true, expense });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/expenses/:id', (req, res) => {
+  try {
+    const expense = db.updateExpense(req.params.id, req.body);
+    if (!expense) return res.status(404).json({ success: false, error: 'Gasto no encontrado' });
+    res.json({ success: true, expense });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/expenses/:id', (req, res) => {
+  try {
+    const deleted = db.deleteExpense(req.params.id);
+    res.json({ success: deleted });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/expenses', (req, res) => {
+  db.saveExpenses(req.body);
+  res.json({ success: true });
+});
+
+// ==========================================
+// SERVICES & COPY PRICES DB ENDPOINTS
+// ==========================================
+app.get('/api/services', (req, res) => {
+  res.json(db.getServices());
+});
+
+app.post('/api/services', (req, res) => {
+  try {
+    const service = db.createService(req.body);
+    res.json({ success: true, service });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/services/:id', (req, res) => {
+  try {
+    const service = db.updateService(req.params.id, req.body);
+    if (!service) return res.status(404).json({ success: false, error: 'Servicio no encontrado' });
+    res.json({ success: true, service });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/services/:id', (req, res) => {
+  try {
+    const deleted = db.deleteService(req.params.id);
+    res.json({ success: deleted });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/services', (req, res) => {
+  db.saveServices(req.body);
+  res.json({ success: true });
+});
+
+// ==========================================
 // AI SCANS DB ENDPOINTS
 // ==========================================
 app.get('/api/ai-scans', (req, res) => {

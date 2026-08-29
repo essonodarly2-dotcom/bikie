@@ -117,6 +117,8 @@ export interface DbSchema {
   cash_registers: any[];
   cash_movements: any[];
   sales: any[];
+  expenses: any[];
+  services: any[];
   ai_scans: any[];
   activity_logs: any[];
   settings: DbStoreSettings;
@@ -128,8 +130,18 @@ const DB_FILE_PATH = path.join(process.cwd(), 'data', 'bikie_database.json');
 const INITIAL_DB_DATA: DbSchema = {
   users: [
     {
-      id: 'usr-admin-tia',
-      name: 'Propietaria BIKIE (Tía)',
+      id: 'usr-admin-marialidia',
+      name: 'María Lidia (Propietaria BIKIE)',
+      email: 'marialidia@bikie.gq',
+      phone: '+240 222 123 456',
+      password: '1234',
+      role: 'admin',
+      points: 2500,
+      created_at: new Date(Date.now() - 180 * 86400000).toISOString(),
+    },
+    {
+      id: 'usr-admin-propietaria',
+      name: 'María Lidia',
       email: 'propietaria@bikie.gq',
       phone: '+240 222 123 456',
       password: '1234',
@@ -495,6 +507,8 @@ const INITIAL_DB_DATA: DbSchema = {
   ],
   cash_movements: [],
   sales: [],
+  expenses: [],
+  services: [],
   ai_scans: [],
   activity_logs: [],
   settings: {
@@ -578,9 +592,30 @@ class BikieDatabase {
     const cleanPin = passwordOrPin.trim();
 
     // Find user in the database
-    const user = this.data.users.find(
-      (u) => u.email.toLowerCase() === cleanEmail || (cleanEmail === 'admin' && u.role === 'admin')
+    let user = this.data.users.find(
+      (u) =>
+        u.email.toLowerCase() === cleanEmail ||
+        (cleanEmail === 'admin' && u.role === 'admin') ||
+        (cleanEmail === 'marialidia' && (u.email.includes('marialidia') || u.name.includes('María Lidia'))) ||
+        (cleanEmail === 'propietaria' && (u.email.includes('propietaria') || u.name.includes('María Lidia')))
     );
+
+    // If user not yet in array, check for Maria Lidia or admin defaults
+    if (!user && (cleanEmail === 'marialidia@bikie.gq' || cleanEmail === 'propietaria@bikie.gq' || cleanEmail === 'admin@bikie.gq')) {
+      const defaultUser: DbUser = {
+        id: cleanEmail.startsWith('marialidia') ? 'usr-admin-marialidia' : (cleanEmail.startsWith('admin') ? 'usr-admin-general' : 'usr-admin-propietaria'),
+        name: cleanEmail.startsWith('admin') ? 'Administrador General BIKIE' : 'María Lidia (Propietaria BIKIE)',
+        email: cleanEmail,
+        phone: '+240 222 123 456',
+        password: '1234',
+        role: 'admin',
+        points: 2500,
+        created_at: new Date().toISOString(),
+      };
+      this.data.users.push(defaultUser);
+      this.saveDatabase();
+      user = defaultUser;
+    }
 
     if (!user) {
       return {
@@ -662,6 +697,8 @@ class BikieDatabase {
       cash_registers: this.data.cash_registers,
       cash_movements: this.data.cash_movements,
       sales: this.data.sales,
+      expenses: this.getExpenses(),
+      services: this.getServices(),
       ai_scans: this.data.ai_scans,
       activity_logs: this.data.activity_logs,
       users: this.getUsers(),
@@ -1032,6 +1069,92 @@ class BikieDatabase {
 
   public saveSuppliers(suppliers: any[]) {
     this.data.suppliers = suppliers;
+    this.saveDatabase();
+  }
+
+  // --- EXPENSES ---
+  public getExpenses(): any[] {
+    return this.data.expenses || [];
+  }
+
+  public createExpense(expense: any): any {
+    if (!this.data.expenses) this.data.expenses = [];
+    const newExpense = {
+      ...expense,
+      id: expense.id || `exp-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      created_at: expense.created_at || new Date().toISOString(),
+    };
+    this.data.expenses.unshift(newExpense);
+    this.saveDatabase();
+    return newExpense;
+  }
+
+  public updateExpense(id: string, updates: any): any | null {
+    if (!this.data.expenses) this.data.expenses = [];
+    const idx = this.data.expenses.findIndex((e: any) => e.id === id);
+    if (idx === -1) return null;
+    this.data.expenses[idx] = {
+      ...this.data.expenses[idx],
+      ...updates,
+    };
+    this.saveDatabase();
+    return this.data.expenses[idx];
+  }
+
+  public deleteExpense(id: string): boolean {
+    if (!this.data.expenses) return false;
+    const prevLen = this.data.expenses.length;
+    this.data.expenses = this.data.expenses.filter((e: any) => e.id !== id);
+    const deleted = this.data.expenses.length < prevLen;
+    if (deleted) this.saveDatabase();
+    return deleted;
+  }
+
+  public saveExpenses(expenses: any[]) {
+    this.data.expenses = expenses;
+    this.saveDatabase();
+  }
+
+  // --- SERVICES ---
+  public getServices(): any[] {
+    return this.data.services || [];
+  }
+
+  public createService(service: any): any {
+    if (!this.data.services) this.data.services = [];
+    const newService = {
+      ...service,
+      id: service.id || `srv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      created_at: service.created_at || new Date().toISOString(),
+    };
+    this.data.services.push(newService);
+    this.saveDatabase();
+    return newService;
+  }
+
+  public updateService(id: string, updates: any): any | null {
+    if (!this.data.services) this.data.services = [];
+    const idx = this.data.services.findIndex((s: any) => s.id === id);
+    if (idx === -1) return null;
+    this.data.services[idx] = {
+      ...this.data.services[idx],
+      ...updates,
+    };
+    this.saveDatabase();
+    return this.data.services[idx];
+  }
+
+  public deleteService(id: string): boolean {
+    if (!this.data.services) return false;
+    const prevLen = this.data.services.length;
+    this.data.services = this.data.services.filter((s: any) => s.id !== id);
+    const deleted = this.data.services.length < prevLen;
+    if (deleted) this.saveDatabase();
+    return deleted;
+  }
+
+  public saveServices(services: any[]) {
+    this.data.services = services;
     this.saveDatabase();
   }
 

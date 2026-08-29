@@ -821,15 +821,33 @@ export const INITIAL_EXPENSES: any[] = [
 ];
 
 export const INITIAL_REAL_ADMIN_USER: UserProfile = {
-  id: 'usr-tia-admin-01',
-  email: 'propietaria@bikie.gq',
-  name: 'Propietaria BIKIE (Tía)',
+  id: 'usr-marialidia-01',
+  email: 'marialidia@bikie.gq',
+  name: 'María Lidia (Propietaria BIKIE)',
   phone: '+240 222 111 000',
   role: 'admin',
-  points: 1500,
+  points: 2500,
   created_at: new Date(Date.now() - 180 * 86400000).toISOString(),
 };
 
 export const INITIAL_DEMO_USERS: UserProfile[] = [
   INITIAL_REAL_ADMIN_USER,
+  {
+    id: 'usr-propietaria-02',
+    email: 'propietaria@bikie.gq',
+    name: 'María Lidia',
+    phone: '+240 222 111 000',
+    role: 'admin',
+    points: 2500,
+    created_at: new Date(Date.now() - 180 * 86400000).toISOString(),
+  },
+  {
+    id: 'usr-admin-general-03',
+    email: 'admin@bikie.gq',
+    name: 'Administrador General BIKIE',
+    phone: '+240 222 213 126',
+    role: 'admin',
+    points: 1500,
+    created_at: new Date(Date.now() - 180 * 86400000).toISOString(),
+  },
 ];

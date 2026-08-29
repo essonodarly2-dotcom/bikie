@@ -139,6 +139,8 @@ export const storageService = {
         if (data.cash_registers) setItem(STORAGE_KEYS.CASH_REGISTERS, data.cash_registers);
         if (data.cash_movements) setItem(STORAGE_KEYS.CASH_MOVEMENTS, data.cash_movements);
         if (data.inventory_movements) setItem(STORAGE_KEYS.INVENTORY_MOVEMENTS, data.inventory_movements);
+        if (data.expenses?.length) setItem(STORAGE_KEYS.EXPENSES, data.expenses);
+        if (data.services?.length) setItem(STORAGE_KEYS.SERVICES, data.services);
         if (data.ai_scans) setItem(STORAGE_KEYS.AI_SCANS, data.ai_scans);
       }
       return data;
@@ -491,7 +493,10 @@ export const storageService = {
 
   // Expenses Management
   getExpenses: (): Expense[] => getItem(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES),
-  saveExpenses: (expenses: Expense[]) => setItem(STORAGE_KEYS.EXPENSES, expenses),
+  saveExpenses: (expenses: Expense[]) => {
+    setItem(STORAGE_KEYS.EXPENSES, expenses);
+    api.saveExpenses(expenses).catch(console.error);
+  },
   addExpense: (expense: Omit<Expense, 'id' | 'created_at'>) => {
     const list = getItem<Expense[]>(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
     const newEntry: Expense = {
@@ -500,21 +505,27 @@ export const storageService = {
       created_at: new Date().toISOString(),
     };
     setItem(STORAGE_KEYS.EXPENSES, [newEntry, ...list]);
+    api.createExpense(newEntry).catch(console.error);
     return newEntry;
   },
   updateExpense: (id: string, updates: Partial<Expense>) => {
     const list = getItem<Expense[]>(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
     const updated = list.map((e) => (e.id === id ? { ...e, ...updates } : e));
     setItem(STORAGE_KEYS.EXPENSES, updated);
+    api.updateExpense(id, updates).catch(console.error);
   },
   deleteExpense: (id: string) => {
     const list = getItem<Expense[]>(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
     setItem(STORAGE_KEYS.EXPENSES, list.filter((e) => e.id !== id));
+    api.deleteExpense(id).catch(console.error);
   },
 
   // Services & Copy Prices Management
   getServices: (): ServiceItem[] => getItem(STORAGE_KEYS.SERVICES, INITIAL_SERVICES),
-  saveServices: (services: ServiceItem[]) => setItem(STORAGE_KEYS.SERVICES, services),
+  saveServices: (services: ServiceItem[]) => {
+    setItem(STORAGE_KEYS.SERVICES, services);
+    api.saveServices(services).catch(console.error);
+  },
   addService: (service: Omit<ServiceItem, 'id' | 'created_at'>) => {
     const list = getItem<ServiceItem[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
     const newService: ServiceItem = {
@@ -523,19 +534,23 @@ export const storageService = {
       created_at: new Date().toISOString(),
     };
     setItem(STORAGE_KEYS.SERVICES, [...list, newService]);
+    api.createService(newService).catch(console.error);
     return newService;
   },
   updateService: (id: string, updates: Partial<ServiceItem>) => {
     const list = getItem<ServiceItem[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
     const updated = list.map((s) => (s.id === id ? { ...s, ...updates } : s));
     setItem(STORAGE_KEYS.SERVICES, updated);
+    api.updateService(id, updates).catch(console.error);
   },
   deleteService: (id: string) => {
     const list = getItem<ServiceItem[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
     setItem(STORAGE_KEYS.SERVICES, list.filter((s) => s.id !== id));
+    api.deleteService(id).catch(console.error);
   },
   resetDefaultServices: () => {
     setItem(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    api.saveServices(INITIAL_SERVICES).catch(console.error);
     return INITIAL_SERVICES;
   },
 };
