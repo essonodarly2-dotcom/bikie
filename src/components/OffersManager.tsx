@@ -394,38 +394,80 @@ export const OffersManager: React.FC<OffersManagerProps> = ({
               </div>
 
               {/* Product and Category Targeting */}
-              <div className="space-y-3 p-3 bg-slate-800/80 rounded-2xl border border-slate-700">
+              <div className="space-y-3 p-3.5 bg-slate-800/80 rounded-2xl border border-slate-700">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1 flex items-center justify-between">
-                    <span>Producto Específico en Oferta (Opcional)</span>
-                    <span className="text-[10px] text-slate-400">
+                  <label className="block text-slate-300 font-bold mb-1.5 flex items-center justify-between">
+                    <span>🎯 Producto(s) Específico(s) en Oferta (Opcional)</span>
+                    <span className="text-[11px] font-semibold text-red-400">
                       {selectedProductIds.length} seleccionados
                     </span>
                   </label>
+                  
+                  {/* Select dropdown */}
                   <select
                     value={selectedProductIds[0] || ''}
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val) {
-                        setSelectedProductIds([val]);
-                      } else {
-                        setSelectedProductIds([]);
+                        setSelectedProductIds((prev) => (prev.includes(val) ? prev : [...prev, val]));
                       }
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
                   >
-                    <option value="">-- Toda la tienda / Oferta General --</option>
+                    <option value="">-- Añadir un producto específico a la oferta --</option>
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} ({formatXAF(p.sale_price)})
+                        {p.name} ({formatXAF(p.sale_price)}) - SKU: {p.sku}
                       </option>
                     ))}
                   </select>
+
+                  {/* Selected products chips */}
+                  {selectedProductIds.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>Productos incluidos en esta promoción:</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProductIds([])}
+                          className="text-red-400 hover:underline cursor-pointer"
+                        >
+                          Quitar todos
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedProductIds.map((pId) => {
+                          const prod = products.find((p) => p.id === pId);
+                          if (!prod) return null;
+                          return (
+                            <span
+                              key={pId}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-red-950/80 border border-red-800 text-red-200 text-xs font-semibold"
+                            >
+                              <img
+                                src={prod.image}
+                                alt={prod.name}
+                                className="w-4 h-4 rounded-full object-cover shrink-0"
+                              />
+                              <span className="truncate max-w-[150px]">{prod.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedProductIds((prev) => prev.filter((id) => id !== pId))}
+                                className="text-red-400 hover:text-white cursor-pointer ml-0.5"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">
-                    O Aplicar a una Categoría Completa
+                    🏷️ O Aplicar a una Categoría Completa
                   </label>
                   <select
                     value={selectedCategoryIds[0] || ''}
@@ -439,7 +481,7 @@ export const OffersManager: React.FC<OffersManagerProps> = ({
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
                   >
-                    <option value="">-- Ninguna categoría fija --</option>
+                    <option value="">-- Toda la tienda (Sin categoría fija) --</option>
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -485,15 +527,14 @@ export const OffersManager: React.FC<OffersManagerProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 font-bold mb-1">Estado Inicial</label>
+                <label className="block text-slate-400 font-bold mb-1">Estado</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as any)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
                 >
-                  <option value="active">Activa (Visible inmediatamente)</option>
-                  <option value="paused">Pausada (Borrador)</option>
-                  <option value="scheduled">Programada</option>
+                  <option value="active">🟢 Activa (Visible en tienda)</option>
+                  <option value="paused">⏸️ Pausada (Oculta y suspendida)</option>
                 </select>
               </div>
 

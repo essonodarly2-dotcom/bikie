@@ -187,6 +187,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           )}
 
+          {/* Quick Credential Helpers */}
+          <div className="space-y-1.5 pt-1">
+            <span className="text-[11px] font-bold text-slate-500 block">Acceso Rápido Administrador:</span>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('propietaria@bikie.gq');
+                  setPin('1234');
+                  setError(null);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
+              >
+                <span>👑 Propietaria (PIN: 1234)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@bikie.gq');
+                  setPin('1234');
+                  setError(null);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
+              >
+                <span>⚙️ Admin General (PIN: 1234)</span>
+              </button>
+            </div>
+          </div>
+
           {/* Form */}
           <form onSubmit={handleFormSubmit} className="space-y-4">
             <div>

@@ -16,6 +16,8 @@ import {
   MapPin,
   FileText,
   ShieldCheck,
+  Send,
+  CheckCircle2,
 } from 'lucide-react';
 import { CartItem, Coupon, Order, StoreSettings, UserProfile } from '../types';
 import { formatXAF, formatDate } from '../utils/formatters';
@@ -72,6 +74,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [couponFeedback, setCouponFeedback] = useState<{ success?: boolean; text?: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSendingOrder, setIsSendingOrder] = useState(false);
+  const [submittedOrder, setSubmittedOrder] = useState<Order | null>(null);
 
   if (!isOpen) return null;
 
@@ -104,7 +107,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     if (res.success) setCouponInput('');
   };
 
-  const handleSendWhatsAppOrder = (e: React.FormEvent) => {
+  const handleSendOrder = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
@@ -112,7 +115,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     const cleanPhone = customerPhone.trim();
 
     if (!cleanName || cleanName.length < 3) {
-      setFormError('Por favor introduce tu Nombre y Apellidos para la factura.');
+      setFormError('Por favor introduce tu Nombre y Apellidos para registrar el pedido.');
       return;
     }
 
@@ -137,7 +140,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       // 1. Deduct Stock
       const stockResult = storageService.deductStock(
         effectiveItems.map((i) => ({ product_id: i.product.id, quantity: i.quantity })),
-        `Pedido web WhatsApp de ${cleanName}`,
+        `Pedido web de ${cleanName}`,
         cleanName
       );
 
@@ -181,72 +184,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         created_at: new Date().toISOString(),
       };
 
-      // 3. Save order
+      // 3. Save order to database & local persistence
       storageService.saveOrders([newOrder, ...existingOrders]);
 
       // 4. Save activity log
       storageService.addActivityLog({
         user_name: cleanName,
         user_role: 'customer',
-        action: 'Creó pedido desde Carrito con Factura WhatsApp',
-        details: `Pedido #${orderCode} por ${formatXAF(total)}`,
+        action: 'Envió un nuevo pedido desde el Carrito',
+        details: `Pedido #${orderCode} por ${formatXAF(total)}. Pendiente de cobro y envío de factura por WhatsApp.`,
       });
 
-      // 5. Generate formatted WhatsApp message
-      const storeWhatsApp = (storeSettings.whatsapp || '222213126').replace(/[^0-9]/g, '');
-      const waNumber = storeWhatsApp.startsWith('240') ? storeWhatsApp : `240${storeWhatsApp}`;
-
-      let msg = `*🛒 NUEVO PEDIDO Y SOLICITUD DE FACTURA — BIKIE PAPELERÍA*\n`;
-      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg += `📄 *Pedido:* #${orderCode}\n`;
-      msg += `👤 *Cliente:* ${cleanName}\n`;
-      msg += `📱 *Tel / WhatsApp:* ${cleanPhone}\n`;
-      msg += `📍 *Modalidad:* ${deliveryType === 'delivery' ? `🛵 Entrega a Domicilio (${deliveryAddress})` : '🏪 Recogida en Tienda (Paraíso, Malabo)'}\n`;
-      if (orderNotes.trim()) {
-        msg += `📝 *Notas:* ${orderNotes.trim()}\n`;
-      }
-      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg += `*DETALLE DE ARTÍCULOS:*\n`;
-
-      effectiveItems.forEach((item, idx) => {
-        msg += `${idx + 1}. ${item.product.name}\n`;
-        msg += `   ↳ ${item.quantity} un. x ${formatXAF(item.product.sale_price)} = *${formatXAF(item.product.sale_price * item.quantity)}*\n`;
+      // 5. Add Notification for Admin
+      storageService.addNotification({
+        target: 'admin',
+        title: `Nuevo Pedido ${orderCode}`,
+        message: `${cleanName} envió un pedido de ${formatXAF(total)}. Revisa y envía la factura tras cobrar.`,
+        type: 'order',
       });
 
-      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg += `*Subtotal:* ${formatXAF(subtotal)}\n`;
-      if (totalDiscount > 0) {
-        msg += `*Descuentos:* -${formatXAF(totalDiscount)}\n`;
-      }
-      if (deliveryCost > 0) {
-        msg += `*Envío Malabo:* ${formatXAF(deliveryCost)}\n`;
-      }
-      msg += `*TOTAL A PAGAR:* *${formatXAF(total)}*\n`;
-      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg += `📍 *Tienda:* Paraiso, cerca de banje, Malabo, Guinea Ecuatorial\n`;
-      msg += `📞 *Atención:* 222213126\n`;
-      msg += `_Por favor confirmad mi pedido y remitidme la factura oficial. ¡Gracias!_`;
-
-      const encodedMsg = encodeURIComponent(msg);
-      const waUrl = `https://wa.me/${waNumber}?text=${encodedMsg}`;
-
-      // 6. Open WhatsApp
-      window.open(waUrl, '_blank');
-
-      // 7. Open Invoice modal if callback provided
-      if (onOpenInvoiceModal) {
-        onOpenInvoiceModal(newOrder);
-      }
-
-      // 8. Clear Cart
+      // 6. Clear Cart
       if (onClearCart) {
         onClearCart();
       }
 
+      setSubmittedOrder(newOrder);
       setIsSendingOrder(false);
-      onClose();
     } catch (err) {
-      console.error('Error al enviar pedido por WhatsApp:', err);
+      console.error('Error al enviar pedido:', err);
       setFormError('Hubo un problema al procesar el pedido. Por favor intenta de nuevo.');
       setIsSendingOrder(false);
     }
@@ -291,8 +256,84 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           </button>
         </div>
 
-        {/* Cart Items List */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+        {/* Cart Items List or Submitted Screen */}
+        {submittedOrder ? (
+          <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center text-center space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-600/10">
+              <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                ¡Pedido Recibido en BIKIE!
+              </span>
+              <h3 className="text-2xl font-black font-['Outfit'] text-slate-900">
+                Pedido #{submittedOrder.code}
+              </h3>
+              <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                Registrado para <strong>{submittedOrder.customer_name}</strong>
+              </p>
+            </div>
+
+            {/* Explanatory banner */}
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-left text-xs text-amber-900 space-y-2 w-full">
+              <div className="flex items-center gap-2 font-bold text-amber-950">
+                <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Gestión de Pedido & Cobro</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-amber-800">
+                La administradora de BIKIE ha recibido tu pedido de <strong>{formatXAF(submittedOrder.total)}</strong>. Revisará el stock, procesará el cobro y te enviará la factura oficial y comprobante directamente por WhatsApp al número <strong>{submittedOrder.customer_phone}</strong>.
+              </p>
+            </div>
+
+            {/* Summary mini card */}
+            <div className="w-full bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs space-y-2 text-left">
+              <div className="flex justify-between text-slate-600">
+                <span>Modalidad:</span>
+                <span className="font-bold text-slate-900">
+                  {submittedOrder.delivery_type === 'delivery' ? `Domicilio (${submittedOrder.delivery_address})` : 'Recogida en Tienda'}
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Artículos:</span>
+                <span className="font-bold text-slate-900">{submittedOrder.items.length} productos</span>
+              </div>
+              <div className="flex justify-between text-slate-900 font-bold pt-2 border-t border-slate-200 text-sm">
+                <span>Total a Cobrar:</span>
+                <span className="text-red-600 font-black">{formatXAF(submittedOrder.total)}</span>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="w-full space-y-2.5 pt-2">
+              {onOpenInvoiceModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenInvoiceModal(submittedOrder);
+                  }}
+                  className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                >
+                  <FileText className="w-4 h-4 text-red-400" />
+                  <span>Ver / Imprimir Ticket del Pedido</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSubmittedOrder(null);
+                  onClose();
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-red-200"
+              >
+                <span>Aceptar y Seguir Comprando</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
           {effectiveItems.length === 0 ? (
             <div className="py-20 text-center space-y-4">
               <div className="w-16 h-16 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
@@ -406,8 +447,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         {/* Footer Checkout & WhatsApp Form */}
         {effectiveItems.length > 0 && (
           <div className="p-4 sm:p-5 border-t border-slate-200 bg-slate-50 space-y-3.5 overflow-y-auto max-h-[50vh]">
-            {/* Customer Details Form for WhatsApp Invoice */}
-            <form onSubmit={handleSendWhatsAppOrder} className="space-y-3">
+            {/* Customer Details Form for Sending Order */}
+            <form onSubmit={handleSendOrder} className="space-y-3">
               <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
                 <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                   <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
@@ -533,35 +574,37 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Button: Enviar Pedido */}
               <div className="space-y-2 pt-1">
                 <button
                   type="submit"
                   disabled={isSendingOrder}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="w-full py-4 px-4 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-black text-sm shadow-lg shadow-red-600/20 hover:shadow-red-600/30 transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 font-['Outfit'] tracking-wide"
                 >
-                  <MessageCircle className="w-5 h-5 text-white" />
-                  <span>{isSendingOrder ? 'Procesando...' : 'Enviar Pedido y Factura por WhatsApp'}</span>
+                  {isSendingOrder ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      <span>Registrando Pedido...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4 text-white" />
+                      <span>Enviar Pedido ({formatXAF(total)})</span>
+                    </>
+                  )}
                 </button>
 
-                {onProceedToCheckout && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onProceedToCheckout();
-                    }}
-                    className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <span>Ir a Pasarela de Pago Completa</span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-300" />
-                  </button>
-                )}
+                <p className="text-[11px] text-center text-slate-500 flex items-center justify-center gap-1.5 px-2">
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>La administradora revisará el pedido y te enviará la factura por WhatsApp tras cobrar.</span>
+                </p>
               </div>
             </form>
           </div>
         )}
-      </div>
-    </div>
+      </>
+    )}
+  </div>
+</div>
   );
 };
