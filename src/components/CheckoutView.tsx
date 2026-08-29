@@ -179,12 +179,13 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
 
   // WhatsApp Order Link Generator
   const generateWhatsAppLink = (order: Order) => {
-    const phone = (settings.whatsapp || '+240555123456').replace(/[^0-9]/g, '');
+    const rawPhone = (settings.whatsapp || '222213126').replace(/[^0-9]/g, '');
+    const phone = rawPhone.startsWith('240') ? rawPhone : `240${rawPhone}`;
     const itemsList = order.items
       .map((i) => `• ${i.quantity}x ${i.product_name} (${formatXAF(i.total_price)})`)
       .join('\n');
 
-    const text = `👋 *¡Hola BIKIE Papelería!*\n\nAcabo de realizar el pedido *${order.code}* a través de la web:\n\n*Cliente:* ${order.customer_name}\n*Teléfono:* ${order.customer_phone}\n*Entrega:* ${order.delivery_type === 'pickup' ? 'Recogida en tienda' : 'Envío a domicilio (' + order.delivery_address + ')'}\n*Método de Pago:* ${order.payment_method}\n\n*Artículos:*\n${itemsList}\n\n*TOTAL A PAGAR:* ${formatXAF(order.total)}\n\nPor favor confírmenme cuando esté listo. ¡Muchas gracias!`;
+    const text = `👋 *¡Hola BIKIE Papelería!*\n\nAcabo de realizar el pedido *${order.code}* a través de la web:\n\n*Cliente:* ${order.customer_name}\n*Teléfono:* ${order.customer_phone}\n*Entrega:* ${order.delivery_type === 'pickup' ? 'Recogida en tienda (Paraíso, Malabo)' : 'Envío a domicilio (' + order.delivery_address + ')'}\n*Método de Pago:* ${order.payment_method}\n\n*Artículos:*\n${itemsList}\n\n*TOTAL A PAGAR:* ${formatXAF(order.total)}\n\nPor favor confírmenme cuando esté listo y envíenme la factura oficial. ¡Muchas gracias!`;
 
     return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
   };

@@ -10,48 +10,72 @@ import {
   Sparkles,
   AlertTriangle,
   Check,
+  MessageCircle,
+  Phone,
+  User,
+  MapPin,
+  FileText,
+  ShieldCheck,
 } from 'lucide-react';
-import { CartItem, Coupon, UserProfile } from '../types';
-import { formatXAF } from '../utils/formatters';
+import { CartItem, Coupon, Order, StoreSettings, UserProfile } from '../types';
+import { formatXAF, formatDate } from '../utils/formatters';
+import { storageService } from '../lib/storage';
 
 interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  items: CartItem[];
+  items?: CartItem[];
+  cart?: CartItem[];
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onRemoveItem: (productId: string) => void;
-  onClearCart: () => void;
-  onProceedToCheckout: () => void;
-  coupons: Coupon[];
-  appliedCoupon: Coupon | null;
-  onApplyCoupon: (code: string) => { success: boolean; message: string };
-  onRemoveCoupon: () => void;
-  currentUser: UserProfile;
-  usePoints: boolean;
-  onToggleUsePoints: (use: boolean) => void;
+  onClearCart?: () => void;
+  onProceedToCheckout?: () => void;
+  coupons?: Coupon[];
+  appliedCoupon?: Coupon | null;
+  onApplyCoupon?: (code: string) => { success: boolean; message: string };
+  onRemoveCoupon?: () => void;
+  currentUser?: UserProfile;
+  usePoints?: boolean;
+  onToggleUsePoints?: (use: boolean) => void;
+  settings?: StoreSettings;
+  onOpenInvoiceModal?: (order: Order) => void;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
   isOpen,
   onClose,
   items,
+  cart,
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
   onProceedToCheckout,
-  appliedCoupon,
+  appliedCoupon = null,
   onApplyCoupon,
   onRemoveCoupon,
   currentUser,
-  usePoints,
+  usePoints = false,
   onToggleUsePoints,
+  settings,
+  onOpenInvoiceModal,
 }) => {
+  const effectiveItems = items || cart || [];
+  const storeSettings: StoreSettings = settings || storageService.getSettings();
+
+  const [customerName, setCustomerName] = useState(currentUser?.name === 'Cliente Invitado' ? '' : (currentUser?.name || ''));
+  const [customerPhone, setCustomerPhone] = useState(currentUser?.phone || '');
+  const [deliveryType, setDeliveryType] = useState<'pickup' | 'delivery'>('pickup');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [orderNotes, setOrderNotes] = useState('');
+
   const [couponInput, setCouponInput] = useState('');
   const [couponFeedback, setCouponFeedback] = useState<{ success?: boolean; text?: string } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSendingOrder, setIsSendingOrder] = useState(false);
 
   if (!isOpen) return null;
 
-  const subtotal = items.reduce((sum, item) => sum + item.product.sale_price * item.quantity, 0);
+  const subtotal = effectiveItems.reduce((sum, item) => sum + item.product.sale_price * item.quantity, 0);
 
   // Calculate coupon discount
   let couponDiscount = 0;
@@ -64,77 +88,261 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   }
 
   // Calculate points discount (1 point = 5 XAF, max 50% of subtotal or user points)
-  const maxPointsToUse = Math.min(currentUser.points || 0, Math.floor(subtotal / 10));
+  const userPoints = currentUser?.points || 0;
+  const maxPointsToUse = Math.min(userPoints, Math.floor(subtotal / 10));
   const pointsDiscount = usePoints ? maxPointsToUse * 5 : 0;
 
+  const deliveryCost = deliveryType === 'delivery' ? 1500 : 0;
   const totalDiscount = couponDiscount + pointsDiscount;
-  const total = Math.max(0, subtotal - totalDiscount);
+  const total = Math.max(0, subtotal - totalDiscount + deliveryCost);
 
   const handleApplyCoupon = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!couponInput.trim()) return;
+    if (!couponInput.trim() || !onApplyCoupon) return;
     const res = onApplyCoupon(couponInput.trim());
     setCouponFeedback({ success: res.success, text: res.message });
     if (res.success) setCouponInput('');
   };
 
+  const handleSendWhatsAppOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+
+    const cleanName = customerName.trim();
+    const cleanPhone = customerPhone.trim();
+
+    if (!cleanName || cleanName.length < 3) {
+      setFormError('Por favor introduce tu Nombre y Apellidos para la factura.');
+      return;
+    }
+
+    if (!cleanPhone || cleanPhone.replace(/[^0-9]/g, '').length < 6) {
+      setFormError('Por favor introduce un Número de Teléfono / WhatsApp válido.');
+      return;
+    }
+
+    if (deliveryType === 'delivery' && !deliveryAddress.trim()) {
+      setFormError('Por favor indica la dirección de entrega en Malabo.');
+      return;
+    }
+
+    if (effectiveItems.length === 0) {
+      setFormError('El carrito está vacío.');
+      return;
+    }
+
+    setIsSendingOrder(true);
+
+    try {
+      // 1. Deduct Stock
+      const stockResult = storageService.deductStock(
+        effectiveItems.map((i) => ({ product_id: i.product.id, quantity: i.quantity })),
+        `Pedido web WhatsApp de ${cleanName}`,
+        cleanName
+      );
+
+      if (!stockResult.success) {
+        setFormError(stockResult.error || 'Stock insuficiente para procesar el pedido.');
+        setIsSendingOrder(false);
+        return;
+      }
+
+      // 2. Generate unique order code
+      const existingOrders = storageService.getOrders();
+      const nextNum = existingOrders.length + 1;
+      const orderCode = `BIKIE-${nextNum.toString().padStart(6, '0')}`;
+
+      const newOrder: Order = {
+        id: `ord-${Date.now()}`,
+        code: orderCode,
+        customer_id: currentUser?.id || 'guest-customer',
+        customer_name: cleanName,
+        customer_email: currentUser?.email || 'cliente@bikie.gq',
+        customer_phone: cleanPhone,
+        delivery_type: deliveryType,
+        delivery_address: deliveryType === 'delivery' ? deliveryAddress.trim() : undefined,
+        city: 'Malabo',
+        notes: orderNotes.trim() || undefined,
+        status: 'pending',
+        payment_method: 'store',
+        payment_status: 'unpaid',
+        subtotal,
+        discount: totalDiscount,
+        coupon_code: appliedCoupon ? appliedCoupon.code : undefined,
+        total,
+        items: effectiveItems.map((i) => ({
+          product_id: i.product.id,
+          product_name: i.product.name,
+          sku: i.product.sku,
+          quantity: i.quantity,
+          unit_price: i.product.sale_price,
+          total_price: i.product.sale_price * i.quantity,
+        })),
+        created_at: new Date().toISOString(),
+      };
+
+      // 3. Save order
+      storageService.saveOrders([newOrder, ...existingOrders]);
+
+      // 4. Save activity log
+      storageService.addActivityLog({
+        user_name: cleanName,
+        user_role: 'customer',
+        action: 'Creó pedido desde Carrito con Factura WhatsApp',
+        details: `Pedido #${orderCode} por ${formatXAF(total)}`,
+      });
+
+      // 5. Generate formatted WhatsApp message
+      const storeWhatsApp = (storeSettings.whatsapp || '222213126').replace(/[^0-9]/g, '');
+      const waNumber = storeWhatsApp.startsWith('240') ? storeWhatsApp : `240${storeWhatsApp}`;
+
+      let msg = `*🛒 NUEVO PEDIDO Y SOLICITUD DE FACTURA — BIKIE PAPELERÍA*\n`;
+      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `📄 *Pedido:* #${orderCode}\n`;
+      msg += `👤 *Cliente:* ${cleanName}\n`;
+      msg += `📱 *Tel / WhatsApp:* ${cleanPhone}\n`;
+      msg += `📍 *Modalidad:* ${deliveryType === 'delivery' ? `🛵 Entrega a Domicilio (${deliveryAddress})` : '🏪 Recogida en Tienda (Paraíso, Malabo)'}\n`;
+      if (orderNotes.trim()) {
+        msg += `📝 *Notas:* ${orderNotes.trim()}\n`;
+      }
+      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `*DETALLE DE ARTÍCULOS:*\n`;
+
+      effectiveItems.forEach((item, idx) => {
+        msg += `${idx + 1}. ${item.product.name}\n`;
+        msg += `   ↳ ${item.quantity} un. x ${formatXAF(item.product.sale_price)} = *${formatXAF(item.product.sale_price * item.quantity)}*\n`;
+      });
+
+      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `*Subtotal:* ${formatXAF(subtotal)}\n`;
+      if (totalDiscount > 0) {
+        msg += `*Descuentos:* -${formatXAF(totalDiscount)}\n`;
+      }
+      if (deliveryCost > 0) {
+        msg += `*Envío Malabo:* ${formatXAF(deliveryCost)}\n`;
+      }
+      msg += `*TOTAL A PAGAR:* *${formatXAF(total)}*\n`;
+      msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `📍 *Tienda:* Paraiso, cerca de banje, Malabo, Guinea Ecuatorial\n`;
+      msg += `📞 *Atención:* 222213126\n`;
+      msg += `_Por favor confirmad mi pedido y remitidme la factura oficial. ¡Gracias!_`;
+
+      const encodedMsg = encodeURIComponent(msg);
+      const waUrl = `https://wa.me/${waNumber}?text=${encodedMsg}`;
+
+      // 6. Open WhatsApp
+      window.open(waUrl, '_blank');
+
+      // 7. Open Invoice modal if callback provided
+      if (onOpenInvoiceModal) {
+        onOpenInvoiceModal(newOrder);
+      }
+
+      // 8. Clear Cart
+      if (onClearCart) {
+        onClearCart();
+      }
+
+      setIsSendingOrder(false);
+      onClose();
+    } catch (err) {
+      console.error('Error al enviar pedido por WhatsApp:', err);
+      setFormError('Hubo un problema al procesar el pedido. Por favor intenta de nuevo.');
+      setIsSendingOrder(false);
+    }
+  };
+
+  const totalQuantity = effectiveItems.reduce((s, i) => s + i.quantity, 0);
+
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/70 backdrop-blur-xs flex justify-end">
+      {/* Backdrop */}
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-md bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-          {/* Cart Header */}
-          <div className="p-4 sm:p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold">
-                <ShoppingBag className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-black font-['Outfit']">Tu Carrito de Compras</h2>
-                <p className="text-xs text-slate-300">
-                  {items.reduce((s, i) => s + i.quantity, 0)} artículos seleccionados
-                </p>
-              </div>
+      {/* Slide-in Drawer */}
+      <div className="relative w-full max-w-lg bg-white shadow-2xl flex flex-col h-full z-10 animate-in slide-in-from-right duration-200">
+        {/* Cart Header */}
+        <div className="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shadow-sm">
+              <ShoppingBag className="w-5 h-5" />
             </div>
-
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div>
+              <h2 className="text-base font-black font-['Outfit'] flex items-center gap-1.5">
+                <span>Tu Carrito de Compras</span>
+                {totalQuantity > 0 && (
+                  <span className="bg-red-600/80 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                    {totalQuantity}
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-400">
+                BIKIE Papelería · Malabo, Guinea Ecuatorial
+              </p>
+            </div>
           </div>
 
-          {/* Cart Items List */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {items.length === 0 ? (
-              <div className="py-20 text-center space-y-3">
-                <div className="w-16 h-16 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
-                  <ShoppingBag className="w-8 h-8" />
-                </div>
-                <p className="text-sm font-bold text-slate-800">Tu carrito está vacío</p>
-                <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                  Explora nuestro catálogo o utiliza la cámara con IA para escanear tu lista de útiles escolares.
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            aria-label="Cerrar carrito"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Cart Items List */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+          {effectiveItems.length === 0 ? (
+            <div className="py-20 text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
+                <ShoppingBag className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-base font-bold text-slate-800">Tu carrito está vacío</p>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                  Agrega libros, cuadernos, bolígrafos o escanea tu lista escolar con IA para llenar tu carrito.
                 </p>
               </div>
-            ) : (
-              items.map((item) => {
+              <button
+                onClick={onClose}
+                className="px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 shadow-xs cursor-pointer"
+              >
+                Explorar Catálogo
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between pb-1 border-b border-slate-100 text-xs text-slate-400">
+                <span>Artículos ({totalQuantity})</span>
+                {onClearCart && (
+                  <button
+                    onClick={onClearCart}
+                    className="text-rose-600 hover:text-rose-700 font-semibold cursor-pointer"
+                  >
+                    Vaciar todo
+                  </button>
+                )}
+              </div>
+
+              {effectiveItems.map((item) => {
                 const isOverStock = item.quantity > item.product.stock;
 
                 return (
                   <div
                     key={item.product.id}
-                    className="p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-red-200 transition-all flex items-center gap-3"
+                    className="p-3 rounded-2xl border border-slate-100 bg-slate-50/60 hover:bg-white hover:border-red-200 transition-all flex items-center gap-3"
                   >
                     <img
                       src={item.product.image}
                       alt={item.product.name}
-                      className="w-16 h-16 rounded-xl object-cover bg-white border border-slate-100 shrink-0"
+                      className="w-14 h-14 rounded-xl object-cover bg-white border border-slate-200 shrink-0"
                     />
 
                     <div className="flex-1 min-w-0 space-y-1">
-                      <p className="text-xs font-bold text-slate-900 truncate">{item.product.name}</p>
+                      <p className="text-xs font-bold text-slate-900 truncate" title={item.product.name}>
+                        {item.product.name}
+                      </p>
                       <p className="text-[11px] text-red-600 font-semibold">
                         {formatXAF(item.product.sale_price)} c/u
                       </p>
@@ -148,8 +356,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                       {/* Quantity Controls */}
                       <div className="flex items-center justify-between pt-1">
-                        <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white">
+                        <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-2xs">
                           <button
+                            type="button"
                             onClick={() => onUpdateQuantity(item.product.id, item.quantity - 1)}
                             className="px-2 py-0.5 text-slate-600 hover:bg-slate-100 font-bold text-xs cursor-pointer"
                           >
@@ -159,6 +368,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                             {item.quantity}
                           </span>
                           <button
+                            type="button"
                             onClick={() =>
                               onUpdateQuantity(
                                 item.product.id,
@@ -179,6 +389,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     </div>
 
                     <button
+                      type="button"
                       onClick={() => onRemoveItem(item.product.id)}
                       className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                       title="Quitar"
@@ -187,84 +398,119 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     </button>
                   </div>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
+          )}
+        </div>
 
-          {/* Cart Footer / Checkout Form */}
-          {items.length > 0 && (
-            <div className="p-4 sm:p-6 border-t border-slate-100 bg-slate-50/80 space-y-4">
-              {/* Coupon input */}
-              <form onSubmit={handleApplyCoupon} className="space-y-1.5">
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Tag className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={couponInput}
-                      onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                      placeholder="Cupón (ej. BIKIE10)"
-                      className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-red-600 bg-white font-mono uppercase"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    Aplicar
-                  </button>
+        {/* Footer Checkout & WhatsApp Form */}
+        {effectiveItems.length > 0 && (
+          <div className="p-4 sm:p-5 border-t border-slate-200 bg-slate-50 space-y-3.5 overflow-y-auto max-h-[50vh]">
+            {/* Customer Details Form for WhatsApp Invoice */}
+            <form onSubmit={handleSendWhatsAppOrder} className="space-y-3">
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
+                <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                  <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-red-600" />
+                    Datos para la Factura y Envío
+                  </span>
+                  <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Vía WhatsApp
+                  </span>
                 </div>
 
-                {couponFeedback && (
-                  <p
-                    className={`text-[11px] font-semibold ${
-                      couponFeedback.success ? 'text-emerald-600' : 'text-rose-600'
-                    }`}
-                  >
-                    {couponFeedback.text}
-                  </p>
-                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">
+                      Nombre y Apellidos *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="ej. María Bindang"
+                      className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-red-600 bg-white font-medium"
+                    />
+                  </div>
 
-                {appliedCoupon && (
-                  <div className="flex items-center justify-between text-xs bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-lg border border-emerald-200">
-                    <span className="font-bold flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" />
-                      Cupón {appliedCoupon.code} aplicado
-                    </span>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">
+                      Teléfono / WhatsApp *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="ej. 222213126"
+                      className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-red-600 bg-white font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* Delivery options */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                    Modalidad de Entrega
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 text-xs">
                     <button
                       type="button"
-                      onClick={onRemoveCoupon}
-                      className="text-emerald-700 hover:text-emerald-950 underline font-medium text-[11px] cursor-pointer"
+                      onClick={() => setDeliveryType('pickup')}
+                      className={`p-2 rounded-xl border text-left font-bold transition-all cursor-pointer ${
+                        deliveryType === 'pickup'
+                          ? 'border-red-600 bg-red-50 text-red-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
                     >
-                      Quitar
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                        <span className="text-[11px]">Recoger en Tienda</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 font-normal mt-0.5">Paraíso, Malabo (Gratis)</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryType('delivery')}
+                      className={`p-2 rounded-xl border text-left font-bold transition-all cursor-pointer ${
+                        deliveryType === 'delivery'
+                          ? 'border-red-600 bg-red-50 text-red-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <ShoppingBag className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                        <span className="text-[11px]">A Domicilio</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 font-normal mt-0.5">+1.500 FCFA Malabo</p>
                     </button>
                   </div>
-                )}
-              </form>
 
-              {/* BIKIE Points Redemption */}
-              {currentUser.points > 0 && (
-                <div className="p-2.5 rounded-xl bg-red-50/70 border border-red-100 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-                    <div>
-                      <span className="font-bold text-slate-800">Canjear Puntos BIKIE</span>
-                      <p className="text-[10px] text-slate-500">
-                        Tienes {currentUser.points} pts (descuento {formatXAF(maxPointsToUse * 5)})
-                      </p>
+                  {deliveryType === 'delivery' && (
+                    <div className="pt-1">
+                      <input
+                        type="text"
+                        value={deliveryAddress}
+                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                        placeholder="Dirección exacta en Malabo (Barrio, calle, ref.)"
+                        className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-red-600 bg-white font-medium"
+                      />
                     </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={usePoints}
-                    onChange={(e) => onToggleUsePoints(e.target.checked)}
-                    className="w-4 h-4 text-red-600 rounded-md focus:ring-red-500 cursor-pointer"
-                  />
+                  )}
+                </div>
+              </div>
+
+              {formError && (
+                <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
+                  <span>{formError}</span>
                 </div>
               )}
 
               {/* Summary lines */}
-              <div className="space-y-1.5 text-xs">
+              <div className="space-y-1.5 text-xs pt-1">
                 <div className="flex justify-between text-slate-500">
                   <span>Subtotal</span>
                   <span>{formatXAF(subtotal)}</span>
@@ -275,14 +521,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <span>-{formatXAF(couponDiscount)}</span>
                   </div>
                 )}
-                {pointsDiscount > 0 && (
-                  <div className="flex justify-between text-amber-600 font-semibold">
-                    <span>Descuento puntos</span>
-                    <span>-{formatXAF(pointsDiscount)}</span>
+                {deliveryCost > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Envío Malabo</span>
+                    <span>+{formatXAF(deliveryCost)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-base font-black text-slate-900 border-t pt-2 font-['Outfit']">
-                  <span>Total a pagar</span>
+                <div className="flex justify-between text-base font-black text-slate-900 border-t border-slate-200 pt-1.5 font-['Outfit']">
+                  <span>Total a Pagar</span>
                   <span className="text-red-600">{formatXAF(total)}</span>
                 </div>
               </div>
@@ -290,26 +536,31 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               {/* Action Buttons */}
               <div className="space-y-2 pt-1">
                 <button
-                  onClick={() => {
-                    onClose();
-                    onProceedToCheckout();
-                  }}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-sm shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                  type="submit"
+                  disabled={isSendingOrder}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  <span>Proceder al Pago / Pedido</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <MessageCircle className="w-5 h-5 text-white" />
+                  <span>{isSendingOrder ? 'Procesando...' : 'Enviar Pedido y Factura por WhatsApp'}</span>
                 </button>
 
-                <button
-                  onClick={onClearCart}
-                  className="w-full text-center text-xs text-slate-400 hover:text-rose-600 font-medium transition-colors cursor-pointer"
-                >
-                  Vaciar carrito
-                </button>
+                {onProceedToCheckout && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onProceedToCheckout();
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Ir a Pasarela de Pago Completa</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-300" />
+                  </button>
+                )}
               </div>
-            </div>
-          )}
-        </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );

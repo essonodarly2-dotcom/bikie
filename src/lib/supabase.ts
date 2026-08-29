@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS public.inventory_movements (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 11. Ventas Mostrador (POS)
+-- 11. Ventas Mostrador (POS) & Servicios
 CREATE TABLE IF NOT EXISTS public.sales (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
@@ -203,10 +203,39 @@ CREATE TABLE IF NOT EXISTS public.sales (
     total NUMERIC(12, 2) NOT NULL,
     payment_method payment_method_type DEFAULT 'store',
     cashier_name TEXT NOT NULL,
+    notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 12. Módulo de Caja y Arqueo (Cash Register & Shifts)
+-- 12. Servicios de Impresión, Copias y Gestiones (Services)
+CREATE TABLE IF NOT EXISTS public.services (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'fotocopia',
+    price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL DEFAULT 'unidad',
+    description TEXT,
+    icon TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 13. Control de Gastos Operativos (Expenses)
+CREATE TABLE IF NOT EXISTS public.expenses (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+    payment_method TEXT DEFAULT 'cash',
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    receipt_number TEXT,
+    supplier_name TEXT,
+    user_name TEXT NOT NULL,
+    status TEXT DEFAULT 'paid',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. Módulo de Caja y Arqueo (Cash Register & Shifts)
 CREATE TABLE IF NOT EXISTS public.cash_registers (
     id TEXT PRIMARY KEY,
     opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -226,20 +255,21 @@ CREATE TABLE IF NOT EXISTS public.cash_registers (
 CREATE TABLE IF NOT EXISTS public.cash_movements (
     id TEXT PRIMARY KEY,
     cash_register_id TEXT REFERENCES public.cash_registers(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK (type IN ('in', 'out')),
+    type TEXT NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
     reason TEXT NOT NULL,
     user_name TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 13. Proveedores y Órdenes de Compra
+-- 15. Proveedores y Órdenes de Compra
 CREATE TABLE IF NOT EXISTS public.suppliers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     company TEXT,
     phone TEXT,
     email TEXT,
+    website TEXT,
     address TEXT,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -257,7 +287,7 @@ CREATE TABLE IF NOT EXISTS public.purchases (
     received_at TIMESTAMPTZ
 );
 
--- 14. Historial de Escaneos de Listas Escolares con IA
+-- 16. Historial de Escaneos de Listas Escolares con IA
 CREATE TABLE IF NOT EXISTS public.ai_scans (
     id TEXT PRIMARY KEY,
     customer_name TEXT,
@@ -272,27 +302,27 @@ CREATE TABLE IF NOT EXISTS public.ai_scans (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 15. Registro de Auditoría y Actividad del Personal
+-- 17. Registro de Auditoría y Actividad del Personal
 CREATE TABLE IF NOT EXISTS public.activity_logs (
     id TEXT PRIMARY KEY,
     user_name TEXT NOT NULL,
     user_role TEXT NOT NULL,
     action TEXT NOT NULL,
-    entity TEXT NOT NULL,
+    entity TEXT,
     entity_id TEXT,
     details TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 16. Configuración de Tienda BIKIE
+-- 18. Configuración de Tienda BIKIE
 CREATE TABLE IF NOT EXISTS public.store_settings (
     id INTEGER PRIMARY KEY DEFAULT 1,
     name TEXT NOT NULL DEFAULT 'BIKIE',
     slogan TEXT DEFAULT 'Todo lo que necesitas para estudiar, trabajar y crear',
-    phone TEXT DEFAULT '+240 222 345 678',
-    whatsapp TEXT DEFAULT '+240 555 890 123',
+    phone TEXT DEFAULT '222213126',
+    whatsapp TEXT DEFAULT '222213126',
     email TEXT DEFAULT 'contacto@bikie-papeleria.com',
-    address TEXT DEFAULT 'Avenida de la Independencia, Malabo, Guinea Ecuatorial',
+    address TEXT DEFAULT 'Paraiso, cerca de banje, Malabo, Guinea Ecuatorial',
     city TEXT DEFAULT 'Malabo',
     opening_hours TEXT DEFAULT 'Lunes a Sábado: 08:00 - 19:30',
     currency TEXT DEFAULT 'XAF',
@@ -306,8 +336,12 @@ CREATE TABLE IF NOT EXISTS public.store_settings (
 
 -- Configuración
 INSERT INTO public.store_settings (id, name, slogan, phone, whatsapp, email, address, city, currency, currency_symbol)
-VALUES (1, 'BIKIE', 'Todo lo que necesitas para estudiar, trabajar y crear', '+240 222 345 678', '+240 555 890 123', 'contacto@bikie-papeleria.com', 'Avenida de la Independencia, Edificio Central, Malabo', 'Malabo', 'XAF', 'FCFA')
-ON CONFLICT (id) DO UPDATE SET updated_at = NOW();
+VALUES (1, 'BIKIE', 'Todo lo que necesitas para estudiar, trabajar y crear', '222213126', '222213126', 'contacto@bikie-papeleria.com', 'Paraiso, cerca de banje, Malabo, Guinea Ecuatorial', 'Malabo', 'XAF', 'FCFA')
+ON CONFLICT (id) DO UPDATE SET 
+    address = EXCLUDED.address,
+    phone = EXCLUDED.phone,
+    whatsapp = EXCLUDED.whatsapp,
+    updated_at = NOW();
 
 -- Usuario Administrador Real BIKIE (Propietaria)
 INSERT INTO public.profiles (id, name, email, phone, role, points) VALUES
@@ -379,3 +413,115 @@ export const downloadDatabaseSchemaSql = () => {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 };
+
+/**
+ * Supabase Auth & Session Management Helpers
+ */
+export const authService = {
+  signIn: async (email: string, password: string) => {
+    if (!supabase) {
+      return { success: false, error: 'Supabase no está configurado aún.' };
+    }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password.trim(),
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      // Fetch profile from profiles table
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        const userProfile = {
+          id: data.user.id,
+          email: data.user.email || email,
+          name: profile?.name || data.user.user_metadata?.name || 'Administradora BIKIE',
+          phone: profile?.phone || data.user.user_metadata?.phone || '+240 222 111 000',
+          role: (profile?.role || 'admin') as any,
+          points: profile?.points || 1500,
+          created_at: data.user.created_at,
+        };
+
+        return { success: true, user: userProfile, session: data.session };
+      }
+      return { success: false, error: 'Usuario no encontrado' };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error al autenticar con Supabase' };
+    }
+  },
+
+  signUp: async (email: string, password: string, name: string, phone?: string) => {
+    if (!supabase) {
+      return { success: false, error: 'Supabase no está configurado.' };
+    }
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: password.trim(),
+        options: {
+          data: { name, phone },
+        },
+      });
+
+      if (error) return { success: false, error: error.message };
+      return { success: true, user: data.user, session: data.session };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error en registro con Supabase' };
+    }
+  },
+
+  signOut: async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+  },
+
+  getSession: async () => {
+    if (!supabase) return null;
+    try {
+      const { data } = await supabase.auth.getSession();
+      return data.session;
+    } catch {
+      return null;
+    }
+  },
+
+  onAuthStateChange: (callback: (user: any | null) => void) => {
+    if (!supabase) return () => {};
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        const userProfile = {
+          id: session.user.id,
+          email: session.user.email,
+          name: profile?.name || session.user.user_metadata?.name || 'Administradora BIKIE',
+          phone: profile?.phone || session.user.user_metadata?.phone || '+240 222 111 000',
+          role: (profile?.role || 'admin') as any,
+          points: profile?.points || 1500,
+          created_at: session.user.created_at,
+        };
+        callback(userProfile);
+      } else {
+        callback(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  },
+};
+

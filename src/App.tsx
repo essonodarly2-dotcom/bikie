@@ -663,9 +663,15 @@ export default function App() {
               <p className="text-xs text-slate-400 leading-relaxed max-w-md">
                 {settings.slogan || 'Todo lo que necesitas para estudiar, trabajar y crear.'} Innovación en papelería con escaneo inteligente de listas escolares mediante IA y entrega directa en Malabo, Guinea Ecuatorial.
               </p>
-              <div className="flex items-center gap-3 text-xs text-slate-300">
-                <MapPin className="w-4 h-4 text-red-500 shrink-0" />
-                <span>{settings.address || 'Avda. de la Libertad, Malabo, Guinea Ecuatorial'}</span>
+              <div className="space-y-1.5 text-xs text-slate-300">
+                <div className="flex items-start gap-2.5">
+                  <MapPin className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <span>Paraiso, cerca de banje, malabo, guinea ecuatorial</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Atención al Cliente: <strong>222213126</strong></span>
+                </div>
               </div>
             </div>
 
@@ -719,8 +725,11 @@ export default function App() {
               <p className="text-slate-400">
                 Horario: {settings.opening_hours || 'Lunes a Sábado: 8:00 - 19:30'}
               </p>
+              <div className="text-slate-300">
+                <p className="font-semibold text-slate-200">Teléfono: 222213126</p>
+              </div>
               <a
-                href={`https://wa.me/${(settings.whatsapp || '').replace(/[^0-9]/g, '')}`}
+                href="https://wa.me/240222213126"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors"
@@ -748,17 +757,57 @@ export default function App() {
         </div>
       </footer>
 
+      {/* FLOATING BOTTOM CART BAR (Adapta el carrito para que sea flotante y abajo) */}
+      {cart.length > 0 && currentView !== 'admin' && currentView !== 'checkout' && !isCartOpen && (
+        <div className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xl animate-in slide-in-from-bottom duration-200">
+          <div className="bg-slate-950/95 text-white p-3 sm:p-4 rounded-3xl border border-red-600/40 shadow-2xl backdrop-blur-md flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative w-11 h-11 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shadow-md shrink-0">
+                <ShoppingBag className="w-5 h-5" />
+                <span className="absolute -top-1.5 -right-1.5 bg-white text-red-600 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-950 shadow-xs">
+                  {cart.reduce((sum, item) => sum + item.quantity, 0)}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-300 font-medium truncate">
+                  {cart.reduce((sum, item) => sum + item.quantity, 0)} producto(s) en tu carrito
+                </p>
+                <p className="text-sm sm:text-base font-black text-white font-['Outfit'] truncate">
+                  Total: <span className="text-red-400">{formatXAF(cart.reduce((sum, item) => sum + item.product.sale_price * item.quantity, 0))}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsCartOpen(true)}
+                className="px-4 py-2.5 sm:px-5 sm:py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
+              >
+                <span>Ver Carrito / Factura</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DRAWERS & MODALS */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         cart={cart}
+        items={cart}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveFromCart}
+        onClearCart={() => setCart([])}
         onProceedToCheckout={() => {
           setIsCartOpen(false);
           setCurrentView('checkout');
         }}
+        currentUser={currentUser}
+        settings={settings}
+        onOpenInvoiceModal={(order) => setInvoiceOrder(order)}
       />
 
       <AiListScannerModal

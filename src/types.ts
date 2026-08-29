@@ -178,6 +178,7 @@ export interface Sale {
   total: number;
   payment_method: PaymentMethod;
   cashier_name: string;
+  notes?: string;
   created_at: string;
 }
 
@@ -214,7 +215,34 @@ export interface Supplier {
   phone: string;
   email: string;
   address: string;
+  website?: string;
   notes?: string;
+  created_at: string;
+}
+
+export interface Expense {
+  id: string;
+  concept: string;
+  category: 'rent' | 'utilities' | 'salaries' | 'supplies' | 'maintenance' | 'transport' | 'taxes' | 'other';
+  amount: number;
+  date: string;
+  beneficiary?: string;
+  payment_method?: PaymentMethod | 'cash';
+  registered_by: string;
+  notes?: string;
+  receipt_url?: string;
+  created_at: string;
+}
+
+export interface ServiceItem {
+  id: string;
+  name: string;
+  category: 'copies' | 'documents' | 'printing' | 'juices' | 'other';
+  price: number;
+  unit: string;
+  description?: string;
+  icon?: string;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -296,9 +324,9 @@ export interface ActivityLog {
   user_name: string;
   user_role: string;
   action: string;
-  entity: string;
+  entity?: string;
   entity_id?: string;
-  details: string;
+  details?: string;
   created_at: string;
 }
 

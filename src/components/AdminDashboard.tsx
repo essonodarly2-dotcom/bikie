@@ -50,6 +50,9 @@ import {
   Coffee,
   Receipt,
   FileCheck,
+  TrendingDown,
+  Globe,
+  ExternalLink,
 } from 'lucide-react';
 import {
   Product,
@@ -74,6 +77,7 @@ import { BIKIE_COMPLETE_SQL_SCHEMA, isSupabaseConfigured, downloadDatabaseSchema
 import { ServicesAndSalesManager } from './ServicesAndSalesManager';
 import { SalesHistoryAndReports } from './SalesHistoryAndReports';
 import { OffersManager } from './OffersManager';
+import { ExpensesManager } from './ExpensesManager';
 
 interface AdminDashboardProps {
   currentUser: UserProfile;
@@ -137,6 +141,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newSupplierName, setNewSupplierName] = useState('');
   const [newSupplierCompany, setNewSupplierCompany] = useState('');
   const [newSupplierPhone, setNewSupplierPhone] = useState('');
+  const [newSupplierWebsite, setNewSupplierWebsite] = useState('');
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
 
   // Store Settings Form state
@@ -527,6 +532,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPosCustomerName('Cliente Tienda');
     setPosNotice(`¡Venta #${newOrder.code} completada con éxito (${formatXAF(total)})!`);
     setTimeout(() => setPosNotice(null), 4000);
+    // Automatically open generated invoice for printing / sending
+    onOpenInvoiceModal(newOrder);
     onRefreshData();
   };
 
@@ -596,12 +603,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveNewSupplier = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSupplierName.trim()) return;
+    let formattedWebsite = newSupplierWebsite.trim();
+    if (formattedWebsite && !formattedWebsite.startsWith('http://') && !formattedWebsite.startsWith('https://')) {
+      formattedWebsite = `https://${formattedWebsite}`;
+    }
     const newSup: Supplier = {
       id: `sup-${Date.now()}`,
       name: newSupplierName,
       company: newSupplierCompany || newSupplierName,
       phone: newSupplierPhone,
       email: '',
+      website: formattedWebsite || undefined,
       address: 'Malabo',
       created_at: new Date().toISOString(),
     };
@@ -611,6 +623,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewSupplierName('');
     setNewSupplierCompany('');
     setNewSupplierPhone('');
+    setNewSupplierWebsite('');
     onRefreshData();
   };
 
@@ -877,6 +890,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Registro de Actividad</span>
           </button>
 
+          {/* Control de Gastos */}
+          <button
+            onClick={() => setActiveTab('expenses')}
+            className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
+              activeTab === 'expenses'
+                ? 'bg-red-600 text-white shadow-md'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <TrendingDown className="w-4 h-4 text-rose-400" />
+              <span>Control de Gastos</span>
+            </div>
+            <span className="bg-rose-950 text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-800">
+              Gastos
+            </span>
+          </button>
+
           {/* Settings */}
           <button
             onClick={() => setActiveTab('settings')}
@@ -888,19 +919,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Settings className="w-4 h-4 text-slate-400" />
             <span>Ajustes de Tienda</span>
-          </button>
-
-          {/* Supabase Hub */}
-          <button
-            onClick={() => setActiveTab('supabase')}
-            className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2.5 transition-all cursor-pointer ${
-              activeTab === 'supabase'
-                ? 'bg-red-600 text-white shadow-md'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
-            }`}
-          >
-            <Database className="w-4 h-4 text-emerald-400" />
-            <span>Supabase & Base de Datos</span>
           </button>
         </aside>
 
@@ -1624,10 +1642,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {suppliers.map((s) => (
-                  <div key={s.id} className="p-5 rounded-3xl bg-slate-800/70 border border-slate-700 space-y-2">
-                    <span className="text-xs font-black text-red-400 block">{s.company || s.name}</span>
-                    <p className="text-xs text-slate-300">Contacto: {s.name}</p>
-                    <p className="text-xs text-slate-400">Tel: {s.phone || '-'}</p>
+                  <div key={s.id} className="p-5 rounded-3xl bg-slate-800/70 border border-slate-700 space-y-3 flex flex-col justify-between">
+                    <div className="space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-black text-red-400 block">{s.company || s.name}</span>
+                        {s.website && (
+                          <span className="bg-sky-950 text-sky-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-sky-800 flex items-center gap-1">
+                            <Globe className="w-2.5 h-2.5" /> Web
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-300">Contacto: {s.name}</p>
+                      <p className="text-xs text-slate-400">Tel: {s.phone || '-'}</p>
+                    </div>
+
+                    {s.website && (
+                      <div className="pt-2 border-t border-slate-700/60">
+                        <a
+                          href={s.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-sky-950/80 text-sky-400 hover:text-sky-300 text-xs font-bold border border-slate-700 hover:border-sky-700 transition-all cursor-pointer"
+                          title={`Abrir página web de ${s.company || s.name}`}
+                        >
+                          <Globe className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Visitar Página Web</span>
+                          <ExternalLink className="w-3 h-3 text-slate-400 ml-0.5" />
+                        </a>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1790,90 +1833,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
-          {/* TAB: SUPABASE & SQL HUB */}
-          {activeTab === 'supabase' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                <div>
-                  <h2 className="text-xl font-black font-['Outfit'] text-white flex items-center gap-2">
-                    <Database className="w-5 h-5 text-emerald-400" />
-                    Base de Datos BIKIE (PostgreSQL & Supabase)
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    Esquema DDL completo, tablas relacionales, catálogos, seed data en Francos CFA (XAF) con la cuenta real de la Propietaria.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => downloadDatabaseSchemaSql()}
-                    className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                    title="Descargar script SQL"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Descargar .sql</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCopySql}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>{copiedSql ? '¡Copiado!' : 'Copiar SQL'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Database Quick Stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tabla Products</p>
-                  <p className="text-xl font-black text-white mt-1">{products.length}</p>
-                  <p className="text-[11px] text-emerald-400">SKUs & Materiales</p>
-                </div>
-                <div className="p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tabla Orders</p>
-                  <p className="text-xl font-black text-white mt-1">{orders.length}</p>
-                  <p className="text-[11px] text-red-400">Pedidos Registrados</p>
-                </div>
-                <div className="p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tabla Categories</p>
-                  <p className="text-xl font-black text-white mt-1">{categories.length}</p>
-                  <p className="text-[11px] text-amber-400">Departamentos</p>
-                </div>
-                <div className="p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Usuario Administrador</p>
-                  <p className="text-xl font-black text-white mt-1">1</p>
-                  <p className="text-[11px] text-sky-400">Propietaria (Tía)</p>
-                </div>
-              </div>
-
-              {/* Instructions */}
-              <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 text-xs space-y-2 text-slate-300">
-                <p className="font-bold text-white flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-yellow-400" />
-                  Instrucciones para desplegar la BD en Supabase / Servidor PostgreSQL:
-                </p>
-                <ol className="list-decimal list-inside space-y-1 text-slate-400 pl-1">
-                  <li>Crea un proyecto en <strong className="text-slate-200">Supabase.com</strong> o en cualquier servidor PostgreSQL.</li>
-                  <li>Abre la pestaña <strong className="text-slate-200">SQL Editor</strong> en el panel de Supabase.</li>
-                  <li>Haz clic en <strong className="text-emerald-400">"Copiar SQL"</strong> o <strong className="text-red-400">"Descargar .sql"</strong> y pega todo el script.</li>
-                  <li>Ejecuta el script (<code className="text-yellow-300">Run</code>) para crear todas las tablas, índices, vistas y la cuenta real de la tía.</li>
-                </ol>
-              </div>
-
-              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <span className="font-mono text-emerald-400 font-bold">bikie_complete_database.sql</span>
-                  <span className="text-[10px] text-slate-500 font-mono">PostgreSQL 14+ / Supabase Schema</span>
-                </div>
-                <pre className="mt-3 p-3 bg-slate-900 rounded-xl overflow-x-auto font-mono text-slate-300 max-h-96 text-[11px] leading-relaxed">
-                  {BIKIE_COMPLETE_SQL_SCHEMA}
-                </pre>
-              </div>
-            </div>
+          {/* TAB: CONTROL DE GASTOS */}
+          {activeTab === 'expenses' && (
+            <ExpensesManager
+              expenses={storageService.getExpenses()}
+              settings={settings}
+              currentUser={currentUser}
+              onRefreshData={onRefreshData}
+            />
           )}
         </main>
       </div>
@@ -2492,6 +2459,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   onChange={(e) => setNewSupplierPhone(e.target.value)}
                   placeholder="+240 222..."
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1 flex items-center justify-between">
+                  <span>Página Web / Catálogo Online</span>
+                  <span className="text-[10px] text-slate-500 font-normal">Opcional</span>
+                </label>
+                <input
+                  type="text"
+                  value={newSupplierWebsite}
+                  onChange={(e) => setNewSupplierWebsite(e.target.value)}
+                  placeholder="https://www.proveedor-papeleria.com"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-mono text-[11px]"
                 />
               </div>
 

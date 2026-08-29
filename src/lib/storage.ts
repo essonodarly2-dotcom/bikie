@@ -18,6 +18,8 @@ import {
   StoreSettings,
   AppNotification,
   UserProfile,
+  Expense,
+  ServiceItem,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -29,6 +31,8 @@ import {
   INITIAL_SUPPLIERS,
   INITIAL_DEMO_USERS,
   INITIAL_SETTINGS,
+  INITIAL_SERVICES,
+  INITIAL_EXPENSES,
 } from './mockData';
 import { api, BootstrapData } from './api';
 
@@ -54,6 +58,8 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: 'bikie_notifications_v1',
   FAVORITES: 'bikie_favorites_v1',
   CURRENT_USER: 'bikie_current_user_v1',
+  EXPENSES: 'bikie_expenses_v1',
+  SERVICES: 'bikie_services_v1',
 };
 
 function getItem<T>(key: string, defaultValue: T): T {
@@ -104,6 +110,12 @@ export function initializeStorage() {
   }
   if (!localStorage.getItem(STORAGE_KEYS.CURRENT_USER)) {
     setItem(STORAGE_KEYS.CURRENT_USER, INITIAL_DEMO_USERS[0]);
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.SERVICES)) {
+    setItem(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.EXPENSES)) {
+    setItem(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
   }
 }
 
@@ -330,6 +342,11 @@ export const storageService = {
     setItem(STORAGE_KEYS.OFFERS, [offer, ...list]);
     await api.createOffer(offer);
   },
+  createOffer: async (offer: Offer) => {
+    const list = getItem<Offer[]>(STORAGE_KEYS.OFFERS, INITIAL_OFFERS);
+    setItem(STORAGE_KEYS.OFFERS, [offer, ...list]);
+    await api.createOffer(offer);
+  },
   updateOffer: async (id: string, updates: Partial<Offer>) => {
     const list = getItem<Offer[]>(STORAGE_KEYS.OFFERS, INITIAL_OFFERS);
     const updated = list.map((o) => (o.id === id ? { ...o, ...updates } : o));
@@ -471,4 +488,54 @@ export const storageService = {
 
   getFavorites: (): string[] => getItem(STORAGE_KEYS.FAVORITES, ['prod-01', 'prod-04']),
   saveFavorites: (favorites: string[]) => setItem(STORAGE_KEYS.FAVORITES, favorites),
+
+  // Expenses Management
+  getExpenses: (): Expense[] => getItem(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES),
+  saveExpenses: (expenses: Expense[]) => setItem(STORAGE_KEYS.EXPENSES, expenses),
+  addExpense: (expense: Omit<Expense, 'id' | 'created_at'>) => {
+    const list = getItem<Expense[]>(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
+    const newEntry: Expense = {
+      ...expense,
+      id: `exp-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      created_at: new Date().toISOString(),
+    };
+    setItem(STORAGE_KEYS.EXPENSES, [newEntry, ...list]);
+    return newEntry;
+  },
+  updateExpense: (id: string, updates: Partial<Expense>) => {
+    const list = getItem<Expense[]>(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
+    const updated = list.map((e) => (e.id === id ? { ...e, ...updates } : e));
+    setItem(STORAGE_KEYS.EXPENSES, updated);
+  },
+  deleteExpense: (id: string) => {
+    const list = getItem<Expense[]>(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES);
+    setItem(STORAGE_KEYS.EXPENSES, list.filter((e) => e.id !== id));
+  },
+
+  // Services & Copy Prices Management
+  getServices: (): ServiceItem[] => getItem(STORAGE_KEYS.SERVICES, INITIAL_SERVICES),
+  saveServices: (services: ServiceItem[]) => setItem(STORAGE_KEYS.SERVICES, services),
+  addService: (service: Omit<ServiceItem, 'id' | 'created_at'>) => {
+    const list = getItem<ServiceItem[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    const newService: ServiceItem = {
+      ...service,
+      id: `srv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      created_at: new Date().toISOString(),
+    };
+    setItem(STORAGE_KEYS.SERVICES, [...list, newService]);
+    return newService;
+  },
+  updateService: (id: string, updates: Partial<ServiceItem>) => {
+    const list = getItem<ServiceItem[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    const updated = list.map((s) => (s.id === id ? { ...s, ...updates } : s));
+    setItem(STORAGE_KEYS.SERVICES, updated);
+  },
+  deleteService: (id: string) => {
+    const list = getItem<ServiceItem[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    setItem(STORAGE_KEYS.SERVICES, list.filter((s) => s.id !== id));
+  },
+  resetDefaultServices: () => {
+    setItem(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    return INITIAL_SERVICES;
+  },
 };

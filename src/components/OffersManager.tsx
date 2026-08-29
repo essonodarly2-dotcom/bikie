@@ -393,6 +393,62 @@ export const OffersManager: React.FC<OffersManagerProps> = ({
                 </div>
               </div>
 
+              {/* Product and Category Targeting */}
+              <div className="space-y-3 p-3 bg-slate-800/80 rounded-2xl border border-slate-700">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1 flex items-center justify-between">
+                    <span>Producto Específico en Oferta (Opcional)</span>
+                    <span className="text-[10px] text-slate-400">
+                      {selectedProductIds.length} seleccionados
+                    </span>
+                  </label>
+                  <select
+                    value={selectedProductIds[0] || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val) {
+                        setSelectedProductIds([val]);
+                      } else {
+                        setSelectedProductIds([]);
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
+                  >
+                    <option value="">-- Toda la tienda / Oferta General --</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({formatXAF(p.sale_price)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    O Aplicar a una Categoría Completa
+                  </label>
+                  <select
+                    value={selectedCategoryIds[0] || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val) {
+                        setSelectedCategoryIds([val]);
+                      } else {
+                        setSelectedCategoryIds([]);
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
+                  >
+                    <option value="">-- Ninguna categoría fija --</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-slate-400 font-bold mb-1">URL Imagen Publicitaria / Banner</label>
                 <input

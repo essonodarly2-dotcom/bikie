@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { api } from '../lib/api';
+import { authService, isSupabaseConfigured } from '../lib/supabase';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -73,7 +74,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
 
     try {
-      // Direct call to Database Backend Authentication
+      // 1. Try Supabase Auth first if configured
+      if (isSupabaseConfigured) {
+        const supabaseRes = await authService.signIn(email.trim(), pin.trim());
+        if (supabaseRes.success && supabaseRes.user) {
+          onLoginSuccess(supabaseRes.user);
+          setIsLoading(false);
+          onClose();
+          return;
+        }
+      }
+
+      // 2. Direct call to Database Backend Authentication
       const result = await api.login(email.trim(), pin.trim());
 
       if (result.success && result.user) {

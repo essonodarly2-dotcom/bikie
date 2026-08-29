@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Printer,
@@ -18,54 +18,15 @@ import {
   Phone,
   CreditCard,
   Building,
+  Settings2,
+  X,
+  Save,
+  RotateCcw,
+  Edit2,
 } from 'lucide-react';
-import { Sale, StoreSettings, UserProfile } from '../types';
+import { Sale, StoreSettings, UserProfile, ServiceItem } from '../types';
 import { formatXAF, formatDate } from '../utils/formatters';
 import { storageService } from '../lib/storage';
-
-interface ServicePreset {
-  id: string;
-  category: 'copies' | 'documents' | 'printing' | 'juices' | 'custom';
-  name: string;
-  price: number;
-  unit: string;
-  icon: string;
-}
-
-const DEFAULT_SERVICE_PRESETS: ServicePreset[] = [
-  // COPIAS
-  { id: 'srv-cop-bn', category: 'copies', name: 'Fotocopia B/N A4', price: 50, unit: 'página', icon: 'FileText' },
-  { id: 'srv-cop-color', category: 'copies', name: 'Fotocopia Color A4', price: 150, unit: 'página', icon: 'FileText' },
-  { id: 'srv-cop-a3-bn', category: 'copies', name: 'Fotocopia B/N A3', price: 150, unit: 'página', icon: 'FileText' },
-  { id: 'srv-cop-a3-color', category: 'copies', name: 'Fotocopia Color A3', price: 350, unit: 'página', icon: 'FileText' },
-  { id: 'srv-plast-a4', category: 'copies', name: 'Plastificado A4', price: 500, unit: 'unidad', icon: 'Layers' },
-  { id: 'srv-plast-dni', category: 'copies', name: 'Plastificado Carnet/DNI', price: 300, unit: 'unidad', icon: 'Layers' },
-  { id: 'srv-encuad-esp', category: 'copies', name: 'Encuadernación Espiral', price: 1000, unit: 'cuaderno', icon: 'Scissors' },
-
-  // REDACCIÓN DE DOCUMENTOS
-  { id: 'srv-red-instancia', category: 'documents', name: 'Redacción de Instancia / Carta Oficial', price: 1500, unit: 'doc', icon: 'Edit3' },
-  { id: 'srv-red-cv', category: 'documents', name: 'Redacción y Maquetación de CV', price: 3000, unit: 'doc', icon: 'Edit3' },
-  { id: 'srv-red-contrato', category: 'documents', name: 'Redacción de Contrato (Alquiler/Venta)', price: 5000, unit: 'doc', icon: 'FileCheck' },
-  { id: 'srv-red-solicitud', category: 'documents', name: 'Redacción Solicitud de Empleo', price: 2000, unit: 'doc', icon: 'Edit3' },
-  { id: 'srv-transcripcion', category: 'documents', name: 'Mecanografía / Transcripción', price: 500, unit: 'página', icon: 'Edit3' },
-  { id: 'srv-escaneo', category: 'documents', name: 'Escaneo de Documentos a PDF', price: 200, unit: 'página', icon: 'FileText' },
-
-  // IMPRESIÓN DIGITAL
-  { id: 'srv-imp-bn', category: 'printing', name: 'Impresión Documento B/N', price: 100, unit: 'página', icon: 'Printer' },
-  { id: 'srv-imp-color', category: 'printing', name: 'Impresión Documento Color', price: 250, unit: 'página', icon: 'Printer' },
-  { id: 'srv-imp-foto-1015', category: 'printing', name: 'Impresión Foto Brillante 10x15', price: 1000, unit: 'foto', icon: 'Printer' },
-  { id: 'srv-imp-foto-a4', category: 'printing', name: 'Impresión Foto Brillante A4', price: 2000, unit: 'foto', icon: 'Printer' },
-  { id: 'srv-imp-memoria', category: 'printing', name: 'Impresión Tesis / Memoria Completa', price: 7500, unit: 'unidad', icon: 'Printer' },
-
-  // ZUMOS & BEBIDAS NATURALES
-  { id: 'srv-zumo-naranja', category: 'juices', name: 'Zumo Natural de Naranja Exprimida', price: 1000, unit: 'vaso', icon: 'Coffee' },
-  { id: 'srv-zumo-pina', category: 'juices', name: 'Zumo Natural de Piña de Malabo', price: 1200, unit: 'vaso', icon: 'Coffee' },
-  { id: 'srv-zumo-maracuya', category: 'juices', name: 'Zumo Natural de Maracuyá', price: 1200, unit: 'vaso', icon: 'Coffee' },
-  { id: 'srv-zumo-papaya', category: 'juices', name: 'Zumo de Papaya con Limón', price: 1000, unit: 'vaso', icon: 'Coffee' },
-  { id: 'srv-batido-tropical', category: 'juices', name: 'Batido Tropical Especial BIKIE', price: 1500, unit: 'vaso', icon: 'Coffee' },
-  { id: 'srv-agua-50cl', category: 'juices', name: 'Agua Mineral Fría 50cl', price: 500, unit: 'botella', icon: 'Coffee' },
-  { id: 'srv-malta-fria', category: 'juices', name: 'Refresco / Malta Fría', price: 700, unit: 'botella', icon: 'Coffee' },
-];
 
 interface CartServiceItem {
   id: string;
@@ -88,6 +49,7 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
   onRefreshData,
   onOpenInvoiceModal,
 }) => {
+  const [servicesList, setServicesList] = useState<ServiceItem[]>(() => storageService.getServices());
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'copies' | 'documents' | 'printing' | 'juices' | 'custom'>('all');
   const [serviceCart, setServiceCart] = useState<CartServiceItem[]>([]);
   const [customerName, setCustomerName] = useState('Cliente Mostrador');
@@ -96,30 +58,42 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
-  // Custom Quick Service input state
+  // Manage Services / Price editing Modal state
+  const [isPriceManagerOpen, setIsPriceManagerOpen] = useState(false);
+  const [editingService, setEditingService] = useState<ServiceItem | null>(null);
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServicePrice, setNewServicePrice] = useState<number>(500);
+  const [newServiceUnit, setNewServiceUnit] = useState('página');
+  const [newServiceCategory, setNewServiceCategory] = useState<'copies' | 'documents' | 'printing' | 'juices' | 'other'>('copies');
+
+  // Custom Quick Service input state in POS
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState<number>(500);
   const [customQty, setCustomQty] = useState<number>(1);
   const [customCategory, setCustomCategory] = useState<'copies' | 'documents' | 'printing' | 'juices'>('copies');
 
-  const filteredPresets = selectedCategory === 'all'
-    ? DEFAULT_SERVICE_PRESETS
-    : DEFAULT_SERVICE_PRESETS.filter((p) => p.category === selectedCategory);
+  const refreshServices = () => {
+    setServicesList(storageService.getServices());
+  };
 
-  const handleAddPreset = (preset: ServicePreset) => {
-    const existing = serviceCart.find((i) => i.id === preset.id);
+  const filteredServices = selectedCategory === 'all'
+    ? servicesList.filter((s) => s.is_active !== false)
+    : servicesList.filter((s) => s.category === selectedCategory && s.is_active !== false);
+
+  const handleAddPreset = (service: ServiceItem) => {
+    const existing = serviceCart.find((i) => i.id === service.id);
     if (existing) {
       setServiceCart(
-        serviceCart.map((i) => (i.id === preset.id ? { ...i, quantity: i.quantity + 1 } : i))
+        serviceCart.map((i) => (i.id === service.id ? { ...i, quantity: i.quantity + 1 } : i))
       );
     } else {
       setServiceCart([
         ...serviceCart,
         {
-          id: preset.id,
-          name: preset.name,
-          category: preset.category,
-          unit_price: preset.price,
+          id: service.id,
+          name: service.name,
+          category: service.category,
+          unit_price: service.price,
           quantity: 1,
         },
       ]);
@@ -163,6 +137,7 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
   const subtotal = serviceCart.reduce((sum, item) => sum + item.unit_price * item.quantity, 0);
   const total = Math.max(0, subtotal - discountAmount);
 
+  // Complete Sale & Auto-Generate Invoice
   const handleProcessServiceSale = async () => {
     if (serviceCart.length === 0) return;
 
@@ -202,16 +177,17 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
     if (currentReg) {
       await storageService.addCashMovement({
         id: `cmov-${Date.now()}`,
-        cash_register_id: currentReg.id,
-        type: 'in',
+        register_id: currentReg.id,
+        type: 'sale',
         amount: total,
         reason: `Venta servicios/copias #${receiptCode}`,
-        user_name: currentUser.name,
+        cashier_name: currentUser.name,
         created_at: new Date().toISOString(),
       });
       // update register balance
       await storageService.updateCashRegister(currentReg.id, {
-        current_amount: (currentReg.current_amount || 0) + total,
+        total_sales: (currentReg.total_sales || 0) + total,
+        expected_amount: (currentReg.expected_amount || 0) + total,
       });
     }
 
@@ -225,16 +201,79 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
       details: `${serviceCart.length} conceptos. Cliente: ${customerName}`,
     });
 
-    setSuccessNotice(`¡Venta registrada con éxito! Código: ${receiptCode} (${formatXAF(total)})`);
+    setSuccessNotice(`¡Cobro completado y registrado! Factura generada: ${receiptCode} (${formatXAF(total)})`);
     setTimeout(() => setSuccessNotice(null), 5000);
 
-    // Prompt user to print PRO invoice
+    // Auto open invoice modal
     onOpenInvoiceModal(newSale);
 
     // Reset form
     setServiceCart([]);
     setDiscountAmount(0);
     setCustomerName('Cliente Mostrador');
+    onRefreshData();
+  };
+
+  // Price Modification & Add Service Handlers
+  const handleSaveServicePrice = (serviceId: string, newPrice: number) => {
+    if (newPrice <= 0) return;
+    storageService.updateService(serviceId, { price: newPrice });
+    storageService.addActivityLog({
+      user_name: currentUser.name,
+      user_role: currentUser.role,
+      action: `Actualizó precio de servicio en BD: ${formatXAF(newPrice)}`,
+      entity: 'service',
+      entity_id: serviceId,
+    });
+    refreshServices();
+    onRefreshData();
+  };
+
+  const handleAddNewService = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newServiceName.trim() || newServicePrice <= 0) return;
+
+    storageService.addService({
+      name: newServiceName.trim(),
+      price: Number(newServicePrice),
+      category: newServiceCategory,
+      unit: newServiceUnit.trim() || 'unidad',
+      is_active: true,
+    });
+
+    storageService.addActivityLog({
+      user_name: currentUser.name,
+      user_role: currentUser.role,
+      action: `Creó nuevo servicio en catálogo: ${newServiceName.trim()} (${formatXAF(newServicePrice)})`,
+      entity: 'service',
+      entity_id: `srv-${Date.now()}`,
+    });
+
+    setNewServiceName('');
+    setNewServicePrice(500);
+    setNewServiceUnit('página');
+    refreshServices();
+    onRefreshData();
+  };
+
+  const handleDeleteService = (serviceId: string, name: string) => {
+    if (!confirm(`¿Estás segura de eliminar el servicio "${name}" del catálogo?`)) return;
+    storageService.deleteService(serviceId);
+    storageService.addActivityLog({
+      user_name: currentUser.name,
+      user_role: currentUser.role,
+      action: `Eliminó servicio del catálogo: ${name}`,
+      entity: 'service',
+      entity_id: serviceId,
+    });
+    refreshServices();
+    onRefreshData();
+  };
+
+  const handleResetDefaults = () => {
+    if (!confirm('¿Restablecer todos los precios y servicios a los valores predeterminados de BIKIE?')) return;
+    storageService.resetDefaultServices();
+    refreshServices();
     onRefreshData();
   };
 
@@ -249,16 +288,24 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
             </span>
             <span className="text-emerald-400 font-bold text-xs bg-emerald-950/60 border border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
-              Ingresos sincronizados con BD
+              Precios Editables & Factura Automática
             </span>
           </div>
           <h2 className="text-2xl font-black font-['Outfit'] text-white mt-1">
             Entradas de Dinero: Copias, Redacción, Impresión & Zumos
           </h2>
           <p className="text-xs text-slate-400">
-            Registra cobros rápidos en mostrador, emite facturas oficiales con el nombre del local y controla los ingresos.
+            Registra cobros rápidos en mostrador, emite facturas oficiales con el nombre de BIKIE y edita los precios cuando lo necesites.
           </p>
         </div>
+
+        <button
+          onClick={() => setIsPriceManagerOpen(true)}
+          className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-2 border border-slate-600 shadow-md transition-all cursor-pointer"
+        >
+          <Settings2 className="w-4 h-4 text-yellow-400" />
+          <span>Modificar Precios & Añadir Servicios</span>
+        </button>
       </div>
 
       {successNotice && (
@@ -378,13 +425,13 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[520px] overflow-y-auto pr-1">
-              {filteredPresets.map((preset) => {
-                const isSelected = serviceCart.some((i) => i.id === preset.id);
+              {filteredServices.map((service) => {
+                const isSelected = serviceCart.some((i) => i.id === service.id);
 
                 return (
                   <div
-                    key={preset.id}
-                    onClick={() => handleAddPreset(preset)}
+                    key={service.id}
+                    onClick={() => handleAddPreset(service)}
                     className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between group ${
                       isSelected
                         ? 'bg-red-950/40 border-red-600 shadow-md ring-1 ring-red-500/40'
@@ -395,17 +442,17 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
                       <div className="flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
                         <h4 className="font-bold text-xs text-white truncate group-hover:text-red-300 transition-colors">
-                          {preset.name}
+                          {service.name}
                         </h4>
                       </div>
                       <p className="text-[10px] text-slate-400 capitalize">
-                        Unidad: {preset.unit} · {preset.category}
+                        Unidad: {service.unit} · {service.category}
                       </p>
                     </div>
 
                     <div className="text-right shrink-0">
                       <span className="text-sm font-black text-red-400 font-['Outfit'] block">
-                        {formatXAF(preset.price)}
+                        {formatXAF(service.price)}
                       </span>
                       <button
                         type="button"
@@ -563,11 +610,181 @@ export const ServicesAndSalesManager: React.FC<ServicesAndSalesManagerProps> = (
               className="w-full py-3.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-950 disabled:opacity-50 transition-all cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              <span>Cobrar & Emitir Factura PRO</span>
+              <span>Cobrar & Generar Factura Oficial</span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* ============================================================== */}
+      {/* PRICE MANAGER & SERVICE CREATION MODAL                         */}
+      {/* ============================================================== */}
+      {isPriceManagerOpen && (
+        <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center font-bold">
+                  <Settings2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white font-['Outfit']">
+                    Gestión de Precios & Catálogo de Servicios
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Modifica los precios de copias, redacción, impresiones o zumos, y añade nuevos servicios.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleResetDefaults}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
+                  title="Restablecer precios estándar"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="hidden sm:inline">Restablecer</span>
+                </button>
+                <button
+                  onClick={() => setIsPriceManagerOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Add New Service Form */}
+            <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <h4 className="text-xs font-black uppercase tracking-wider text-red-400 flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" />
+                <span>Añadir Nuevo Servicio al Catálogo</span>
+              </h4>
+
+              <form onSubmit={handleAddNewService} className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                <div className="sm:col-span-2">
+                  <label className="block text-slate-400 font-bold mb-1">Nombre del Servicio</label>
+                  <input
+                    type="text"
+                    required
+                    value={newServiceName}
+                    onChange={(e) => setNewServiceName(e.target.value)}
+                    placeholder="Ej. Fotocopia A2 Plano / Redacción Poder Notarial"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Categoría</label>
+                  <select
+                    value={newServiceCategory}
+                    onChange={(e) => setNewServiceCategory(e.target.value as any)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
+                  >
+                    <option value="copies">Copias / Encuadernación</option>
+                    <option value="documents">Redacción de Documentos</option>
+                    <option value="printing">Impresión Digital</option>
+                    <option value="juices">Zumos & Cafetería</option>
+                    <option value="other">Otro Servicio</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Precio (XAF)</label>
+                  <input
+                    type="number"
+                    required
+                    min={25}
+                    step={25}
+                    value={newServicePrice}
+                    onChange={(e) => setNewServicePrice(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono font-bold focus:border-red-500 focus:outline-hidden"
+                  />
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="block text-slate-400 font-bold mb-1">Unidad (página, doc, vaso, foto)</label>
+                  <input
+                    type="text"
+                    value={newServiceUnit}
+                    onChange={(e) => setNewServiceUnit(e.target.value)}
+                    placeholder="página, documento, unidad, vaso..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white focus:border-red-500 focus:outline-hidden"
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold flex items-center justify-center gap-1.5 shadow-md shadow-red-950 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Guardar Servicio</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* List of Existing Services with Live Price Edits */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-400 uppercase">
+                Servicios Actuales ({servicesList.length}) — Puedes editar el precio de cada uno directamente:
+              </h4>
+
+              <div className="max-h-72 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-800">
+                {servicesList.map((srv) => (
+                  <div
+                    key={srv.id}
+                    className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-800/40 p-2 rounded-xl"
+                  >
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-white">{srv.name}</p>
+                      <p className="text-[11px] text-slate-400 capitalize">
+                        {srv.category} · Unidad: {srv.unit}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-xs">Precio actual:</span>
+                      <input
+                        type="number"
+                        defaultValue={srv.price}
+                        onBlur={(e) => handleSaveServicePrice(srv.id, Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveServicePrice(srv.id, Number((e.target as HTMLInputElement).value));
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-right text-red-400 font-mono font-bold focus:border-red-500 focus:outline-hidden"
+                      />
+                      <span className="text-[11px] text-slate-400">XAF</span>
+
+                      <button
+                        onClick={() => handleDeleteService(srv.id, srv.name)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-950/40 transition-colors cursor-pointer"
+                        title="Eliminar servicio"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setIsPriceManagerOpen(false)}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs cursor-pointer shadow-md shadow-red-950"
+              >
+                Listo / Cerrar Administrador de Precios
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
