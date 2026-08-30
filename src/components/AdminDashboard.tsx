@@ -74,6 +74,12 @@ import {
 import { formatXAF, formatDate, getOrderStatusLabel } from '../utils/formatters';
 import { storageService } from '../lib/storage';
 import { BIKIE_COMPLETE_SQL_SCHEMA, isSupabaseConfigured, downloadDatabaseSchemaSql } from '../lib/supabase';
+import {
+  storeSettingsSchema,
+  productSchema,
+  categorySchema,
+  sanitizeString,
+} from '../lib/validations';
 import { ServicesAndSalesManager } from './ServicesAndSalesManager';
 import { SalesHistoryAndReports } from './SalesHistoryAndReports';
 import { OffersManager } from './OffersManager';
@@ -147,6 +153,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Store Settings Form state
   const [settingsForm, setSettingsForm] = useState<StoreSettings>({ ...settings });
   const [settingsSavedNotice, setSettingsSavedNotice] = useState(false);
+  const [settingsValidationError, setSettingsValidationError] = useState<string | null>(null);
+  const [productValidationError, setProductValidationError] = useState<string | null>(null);
+  const [categoryValidationError, setCategoryValidationError] = useState<string | null>(null);
 
   // Copied SQL schema indicator
   const [copiedSql, setCopiedSql] = useState(false);
@@ -252,16 +261,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
+    setProductValidationError(null);
 
     // Ensure category_name matches category_id
     const targetCat = categories.find((c) => c.id === editingProduct.category_id);
     const resolvedCatName = targetCat ? targetCat.name : editingProduct.category_name;
     const finalProduct = {
       ...editingProduct,
+      name: sanitizeString(editingProduct.name),
+      brand: sanitizeString(editingProduct.brand),
+      sku: sanitizeString(editingProduct.sku),
       category_name: resolvedCatName,
       slug: editingProduct.slug || editingProduct.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       updated_at: new Date().toISOString(),
     };
+
+    const validation = productSchema.safeParse(finalProduct);
+    if (!validation.success) {
+      setProductValidationError(validation.error.issues[0]?.message || 'Error en los datos del producto');
+      return;
+    }
 
     if (products.some((p) => p.id === finalProduct.id)) {
       storageService.updateProduct(finalProduct.id, finalProduct);
@@ -287,6 +306,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setIsProductModalOpen(false);
     setEditingProduct(null);
+    setProductValidationError(null);
     onRefreshData();
   };
 
@@ -347,7 +367,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSaveCategory = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingCategory || !editingCategory.name.trim()) return;
+    if (!editingCategory) return;
+    setCategoryValidationError(null);
 
     const generatedSlug =
       editingCategory.slug.trim() ||
@@ -355,8 +376,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     const finalCategory: Category = {
       ...editingCategory,
-      slug: generatedSlug,
+      name: sanitizeString(editingCategory.name),
+      slug: sanitizeString(generatedSlug),
+      description: sanitizeString(editingCategory.description || ''),
     };
+
+    const validation = categorySchema.safeParse(finalCategory);
+    if (!validation.success) {
+      setCategoryValidationError(validation.error.issues[0]?.message || 'Error en los datos de la categoría');
+      return;
+    }
 
     if (categories.some((c) => c.id === finalCategory.id)) {
       storageService.updateCategory(finalCategory.id, finalCategory);
@@ -382,6 +411,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setIsCategoryModalOpen(false);
     setEditingCategory(null);
+    setCategoryValidationError(null);
     onRefreshData();
   };
 
@@ -627,11 +657,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onRefreshData();
   };
 
-  // Save Settings
+  // Save Settings with Zod Schema Validation
   const handleSaveStoreSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    storageService.saveSettings(settingsForm);
-    onSaveSettings(settingsForm);
+    setSettingsValidationError(null);
+
+    const sanitizedData = {
+      ...settingsForm,
+      name: sanitizeString(settingsForm.name),
+      slogan: sanitizeString(settingsForm.slogan),
+      description: sanitizeString(settingsForm.description || ''),
+      phone: sanitizeString(settingsForm.phone),
+      whatsapp: sanitizeString(settingsForm.whatsapp),
+      email: sanitizeString(settingsForm.email || ''),
+      address: sanitizeString(settingsForm.address || ''),
+      city: sanitizeString(settingsForm.city || 'Malabo'),
+      opening_hours: sanitizeString(settingsForm.opening_hours || ''),
+      free_shipping_min: Number(settingsForm.free_shipping_min) || 0,
+      points_per_1000_xaf: Number(settingsForm.points_per_1000_xaf) || 0,
+    };
+
+    const validation = storeSettingsSchema.safeParse(sanitizedData);
+    if (!validation.success) {
+      setSettingsValidationError(validation.error.issues[0]?.message || 'Error en los datos de configuración');
+      return;
+    }
+
+    const validatedSettings: StoreSettings = {
+      ...settingsForm,
+      ...validation.data,
+    };
+
+    storageService.saveSettings(validatedSettings);
+    onSaveSettings(validatedSettings);
+    setSettingsValidationError(null);
     setSettingsSavedNotice(true);
     setTimeout(() => setSettingsSavedNotice(false), 2500);
   };
@@ -1760,74 +1819,157 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* TAB: AJUSTES DE TIENDA */}
           {activeTab === 'settings' && (
-            <div className="max-w-2xl space-y-6 animate-in fade-in duration-150">
-              <h2 className="text-xl font-black font-['Outfit'] text-white">
-                Configuración General de BIKIE
-              </h2>
+            <div className="max-w-3xl space-y-6 animate-in fade-in duration-150">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-black font-['Outfit'] text-white">
+                    Configuración General de BIKIE Papelería
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Datos de contacto, ubicación en Malabo, políticas de envío y fidelización de clientes
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-800/80 border border-slate-700 rounded-xl text-[11px] text-slate-300">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Validado con Zod Schema</span>
+                </div>
+              </div>
 
               {settingsSavedNotice && (
-                <div className="p-3 bg-emerald-950 border border-emerald-700 text-emerald-300 text-xs font-bold rounded-xl">
-                  ¡Ajustes guardados correctamente!
+                <div className="p-4 bg-emerald-950/80 border border-emerald-600 text-emerald-300 text-xs font-bold rounded-2xl flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>¡Ajustes de la papelería guardados y sincronizados correctamente!</span>
+                </div>
+              )}
+
+              {settingsValidationError && (
+                <div className="p-4 bg-red-950/80 border border-red-600 text-red-300 text-xs font-bold rounded-2xl flex items-center gap-2 animate-in shake">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{settingsValidationError}</span>
                 </div>
               )}
 
               <form onSubmit={handleSaveStoreSettings} className="bg-slate-800/60 border border-slate-700 p-6 rounded-3xl space-y-4 text-xs">
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">Nombre de la Papelería</label>
-                  <input
-                    type="text"
-                    value={settingsForm.name}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">Eslogan Principal</label>
-                  <input
-                    type="text"
-                    value={settingsForm.slogan}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, slogan: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-slate-400 font-bold mb-1">Teléfono</label>
+                    <label className="block text-slate-400 font-bold mb-1">Nombre Comercial de la Papelería *</label>
                     <input
                       type="text"
+                      required
+                      value={settingsForm.name}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })}
+                      placeholder="BIKIE Papelería & Librería"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Eslogan Principal</label>
+                    <input
+                      type="text"
+                      value={settingsForm.slogan}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, slogan: e.target.value })}
+                      placeholder="Todo lo que necesitas para estudiar, trabajar y crear"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Teléfono Principal *</label>
+                    <input
+                      type="text"
+                      required
                       value={settingsForm.phone}
                       onChange={(e) => setSettingsForm({ ...settingsForm, phone: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                      placeholder="222213126"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-bold mb-1">WhatsApp</label>
+                    <label className="block text-slate-400 font-bold mb-1">WhatsApp de Pedidos *</label>
                     <input
                       type="text"
+                      required
                       value={settingsForm.whatsapp}
                       onChange={(e) => setSettingsForm({ ...settingsForm, whatsapp: e.target.value })}
+                      placeholder="222213126"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Correo de Contacto</label>
+                    <input
+                      type="email"
+                      value={settingsForm.email || ''}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, email: e.target.value })}
+                      placeholder="contacto@bikie.gq"
                       className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">Horario Comercial</label>
-                  <input
-                    type="text"
-                    value={settingsForm.opening_hours}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, opening_hours: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Dirección del Local Comercial</label>
+                    <input
+                      type="text"
+                      value={settingsForm.address || ''}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, address: e.target.value })}
+                      placeholder="Paraiso, cerca de banje, Malabo"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Ciudad & País</label>
+                    <input
+                      type="text"
+                      value={settingsForm.city || 'Malabo'}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, city: e.target.value })}
+                      placeholder="Malabo, Guinea Ecuatorial"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Horario Comercial</label>
+                    <input
+                      type="text"
+                      value={settingsForm.opening_hours}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, opening_hours: e.target.value })}
+                      placeholder="Lunes a Sábado: 08:00 - 19:30"
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Envío Gratis Desde (XAF)</label>
+                    <input
+                      type="number"
+                      value={settingsForm.free_shipping_min || 25000}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, free_shipping_min: Number(e.target.value) })}
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Puntos por 1.000 XAF</label>
+                    <input
+                      type="number"
+                      value={settingsForm.points_per_1000_xaf || 10}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, points_per_1000_xaf: Number(e.target.value) })}
+                      className="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-white"
+                    />
+                  </div>
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs cursor-pointer"
+                  className="w-full py-3.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-900/30"
                 >
-                  Guardar Cambios
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Validar y Guardar Cambios en Base de Datos</span>
                 </button>
               </form>
             </div>
@@ -1866,6 +2008,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
+              {productValidationError && (
+                <div className="p-3 bg-red-950 border border-red-600 text-red-300 text-xs font-bold rounded-xl flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{productValidationError}</span>
+                </div>
+              )}
               <div>
                 <label className="block text-slate-400 font-bold mb-1">Nombre del Producto</label>
                 <input
@@ -2146,6 +2294,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <form onSubmit={handleSaveCategory} className="space-y-4 text-xs">
+              {categoryValidationError && (
+                <div className="p-3 bg-red-950 border border-red-600 text-red-300 text-xs font-bold rounded-xl flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{categoryValidationError}</span>
+                </div>
+              )}
               <div>
                 <label className="block text-slate-400 font-bold mb-1">
                   Nombre de la Categoría

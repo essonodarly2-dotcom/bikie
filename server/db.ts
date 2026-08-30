@@ -1,16 +1,53 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import { EventEmitter } from 'events';
 
 export interface DbUser {
   id: string;
   name: string;
   email: string;
   phone?: string;
-  password?: string; // Stored PIN/Password for DB authentication
+  password?: string; // Legacy plaintext or temporary input
+  password_hash?: string; // Cryptographic PBKDF2 hash (SHA-512)
+  salt?: string; // Random 32-character hexadecimal salt
   role: 'admin' | 'employee' | 'inventory_manager' | 'customer';
   points: number;
   created_at: string;
   updated_at?: string;
+  last_login?: string;
+}
+
+// Utility: Cryptographically secure password hashing (PBKDF2 with SHA-512)
+export function hashPassword(plainText: string, existingSalt?: string): { hash: string; salt: string } {
+  const salt = existingSalt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(plainText, salt, 10000, 64, 'sha512').toString('hex');
+  return { hash, salt };
+}
+
+// Utility: Timing-safe password verification to prevent side-channel timing attacks
+export function verifyPassword(
+  plainText: string,
+  storedHash?: string,
+  storedSalt?: string,
+  legacyPlain?: string
+): boolean {
+  if (storedHash && storedSalt) {
+    const computedHash = crypto.pbkdf2Sync(plainText, storedSalt, 10000, 64, 'sha512').toString('hex');
+    try {
+      const computedBuf = Buffer.from(computedHash, 'hex');
+      const storedBuf = Buffer.from(storedHash, 'hex');
+      if (computedBuf.length !== storedBuf.length) return false;
+      return crypto.timingSafeEqual(computedBuf, storedBuf);
+    } catch {
+      return false;
+    }
+  }
+  // Fallback check for initial unmigrated accounts
+  if (legacyPlain) {
+    return plainText === legacyPlain;
+  }
+  return false;
 }
 
 export interface DbCategory {
@@ -533,13 +570,18 @@ const INITIAL_DB_DATA: DbSchema = {
   },
 };
 
-class BikieDatabase {
+class BikieDatabase extends EventEmitter {
   private data: DbSchema;
   private initialized = false;
 
   constructor() {
+    super();
     this.data = JSON.parse(JSON.stringify(INITIAL_DB_DATA));
     this.loadDatabase();
+  }
+
+  private emitChange(type: string, data: any) {
+    this.emit('change', { type, data });
   }
 
   private loadDatabase() {
@@ -560,9 +602,29 @@ class BikieDatabase {
           products: parsed.products && parsed.products.length > 0 ? parsed.products : INITIAL_DB_DATA.products,
           settings: { ...INITIAL_DB_DATA.settings, ...(parsed.settings || {}) },
         };
-      } else {
+      }
+
+      // Security Migration: Auto-hash any legacy plaintext passwords
+      let dbNeedsMigrationSave = false;
+      this.data.users = this.data.users.map((u) => {
+        if (!u.password_hash && (u.password || u.email)) {
+          const rawPass = u.password || '1234';
+          const { hash, salt } = hashPassword(rawPass);
+          dbNeedsMigrationSave = true;
+          return {
+            ...u,
+            password_hash: hash,
+            salt,
+            password: undefined, // Strip plaintext from stored state
+          };
+        }
+        return u;
+      });
+
+      if (dbNeedsMigrationSave || !fs.existsSync(DB_FILE_PATH)) {
         this.saveDatabase();
       }
+
       this.initialized = true;
     } catch (err) {
       console.error('Error loading Bikie Database from file:', err);
@@ -582,10 +644,10 @@ class BikieDatabase {
     }
   }
 
-  // --- AUTHENTICATION ---
+  // --- AUTHENTICATION & SECURITY ---
   public authenticateUser(email: string, passwordOrPin: string): { success: boolean; user?: DbUser; error?: string } {
     if (!email || !passwordOrPin) {
-      return { success: false, error: 'Correo y contraseña son requeridos' };
+      return { success: false, error: 'Debes proporcionar tu correo electrónico y tu clave/PIN.' };
     }
 
     const cleanEmail = email.trim().toLowerCase();
@@ -596,18 +658,20 @@ class BikieDatabase {
       (u) =>
         u.email.toLowerCase() === cleanEmail ||
         (cleanEmail === 'admin' && u.role === 'admin') ||
-        (cleanEmail === 'marialidia' && (u.email.includes('marialidia') || u.name.includes('María Lidia'))) ||
-        (cleanEmail === 'propietaria' && (u.email.includes('propietaria') || u.name.includes('María Lidia')))
+        (cleanEmail === 'marialidia' && (u.email.includes('marialidia') || u.name.toLowerCase().includes('maría lidia') || u.name.toLowerCase().includes('maria lidia'))) ||
+        (cleanEmail === 'propietaria' && (u.email.includes('propietaria') || u.name.toLowerCase().includes('maría lidia') || u.name.toLowerCase().includes('maria lidia')))
     );
 
-    // If user not yet in array, check for Maria Lidia or admin defaults
+    // If default admin accounts do not exist in DB yet, auto-provision with secure hash
     if (!user && (cleanEmail === 'marialidia@bikie.gq' || cleanEmail === 'propietaria@bikie.gq' || cleanEmail === 'admin@bikie.gq')) {
+      const { hash, salt } = hashPassword('1234');
       const defaultUser: DbUser = {
         id: cleanEmail.startsWith('marialidia') ? 'usr-admin-marialidia' : (cleanEmail.startsWith('admin') ? 'usr-admin-general' : 'usr-admin-propietaria'),
         name: cleanEmail.startsWith('admin') ? 'Administrador General BIKIE' : 'María Lidia (Propietaria BIKIE)',
         email: cleanEmail,
         phone: '+240 222 123 456',
-        password: '1234',
+        password_hash: hash,
+        salt,
         role: 'admin',
         points: 2500,
         created_at: new Date().toISOString(),
@@ -615,60 +679,108 @@ class BikieDatabase {
       this.data.users.push(defaultUser);
       this.saveDatabase();
       user = defaultUser;
+      this.emitChange('user_created', defaultUser);
     }
 
     if (!user) {
+      // Do not leak detailed reason for anti-enumeration security
       return {
         success: false,
-        error: `El usuario "${email}" no existe en la base de datos de BIKIE.`,
+        error: 'Credenciales inválidas. Por favor verifica tu correo y contraseña.',
       };
     }
 
-    // Verify password/PIN in the database
-    const expectedPassword = user.password || '1234';
-    if (user.password && user.password !== cleanPin && cleanPin !== '1234') {
+    // Verify hashed password using timing-safe PBKDF2 comparison
+    const isPasswordValid = verifyPassword(cleanPin, user.password_hash, user.salt, user.password);
+
+    if (!isPasswordValid) {
       return {
         success: false,
-        error: 'Contraseña o código PIN incorrecto para este usuario.',
+        error: 'Credenciales inválidas. Por favor verifica tu correo y contraseña.',
       };
     }
 
-    // Return user without sensitive password in the output
-    const { password, ...safeUser } = user;
+    // Upgrade legacy password if needed
+    if (!user.password_hash && user.salt) {
+      const { hash, salt } = hashPassword(cleanPin, user.salt);
+      user.password_hash = hash;
+      delete user.password;
+      this.saveDatabase();
+    }
+
+    user.last_login = new Date().toISOString();
+    this.saveDatabase();
+
+    // Strip sensitive cryptographic hashes from payload
+    const { password, password_hash, salt, ...safeUser } = user;
     return { success: true, user: safeUser as DbUser };
   }
 
   // --- USERS CRUD ---
-  public getUsers(): Omit<DbUser, 'password'>[] {
-    return this.data.users.map(({ password, ...u }) => u);
+  public getUsers(): Omit<DbUser, 'password' | 'password_hash' | 'salt'>[] {
+    return this.data.users.map(({ password, password_hash, salt, ...u }) => u);
   }
 
-  public createUser(userData: Partial<DbUser>): DbUser {
+  public getUserById(id: string): Omit<DbUser, 'password' | 'password_hash' | 'salt'> | null {
+    const user = this.data.users.find((u) => u.id === id);
+    if (!user) return null;
+    const { password, password_hash, salt, ...safeUser } = user;
+    return safeUser;
+  }
+
+  public createUser(userData: Partial<DbUser> & { plainPassword?: string }): Omit<DbUser, 'password' | 'password_hash' | 'salt'> {
+    const rawPass = userData.plainPassword || userData.password || '1234';
+    const { hash, salt } = hashPassword(rawPass);
+
     const newUser: DbUser = {
       id: userData.id || `usr-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       name: userData.name || 'Nuevo Usuario',
-      email: userData.email || `usuario-${Date.now()}@bikie.gq`,
+      email: userData.email?.trim().toLowerCase() || `usuario-${Date.now()}@bikie.gq`,
       phone: userData.phone || '',
-      password: userData.password || '1234',
+      password_hash: hash,
+      salt,
       role: userData.role || 'customer',
       points: userData.points || 0,
       created_at: new Date().toISOString(),
     };
+
     this.data.users.push(newUser);
     this.saveDatabase();
-    return newUser;
+    this.emitChange('user_created', newUser);
+
+    const { password, password_hash, salt: userSalt, ...safeUser } = newUser;
+    return safeUser;
   }
 
-  public updateUser(id: string, updates: Partial<DbUser>): DbUser | null {
+  public updateUser(id: string, updates: Partial<DbUser> & { plainPassword?: string }): Omit<DbUser, 'password' | 'password_hash' | 'salt'> | null {
     const idx = this.data.users.findIndex((u) => u.id === id);
     if (idx === -1) return null;
+
+    let newHash = this.data.users[idx].password_hash;
+    let newSalt = this.data.users[idx].salt;
+
+    if (updates.plainPassword || updates.password) {
+      const passToHash = updates.plainPassword || updates.password!;
+      const hashResult = hashPassword(passToHash);
+      newHash = hashResult.hash;
+      newSalt = hashResult.salt;
+    }
+
+    const { plainPassword, password, password_hash, salt, ...cleanUpdates } = updates;
+
     this.data.users[idx] = {
       ...this.data.users[idx],
-      ...updates,
+      ...cleanUpdates,
+      password_hash: newHash,
+      salt: newSalt,
       updated_at: new Date().toISOString(),
     };
+
     this.saveDatabase();
-    return this.data.users[idx];
+    this.emitChange('user_updated', this.data.users[idx]);
+
+    const { password: p, password_hash: ph, salt: s, ...safeUser } = this.data.users[idx];
+    return safeUser;
   }
 
   public deleteUser(id: string): boolean {
@@ -676,6 +788,7 @@ class BikieDatabase {
     this.data.users = this.data.users.filter((u) => u.id !== id);
     if (this.data.users.length !== initLen) {
       this.saveDatabase();
+      this.emitChange('user_deleted', { id });
       return true;
     }
     return false;
@@ -737,6 +850,7 @@ class BikieDatabase {
     };
     this.data.products.unshift(newProd);
     this.saveDatabase();
+    this.emitChange('product_created', newProd);
     return newProd;
   }
 
@@ -749,6 +863,7 @@ class BikieDatabase {
       updated_at: new Date().toISOString(),
     };
     this.saveDatabase();
+    this.emitChange('product_updated', this.data.products[idx]);
     return this.data.products[idx];
   }
 
@@ -757,6 +872,7 @@ class BikieDatabase {
     this.data.products = this.data.products.filter((p) => p.id !== id);
     if (this.data.products.length !== len) {
       this.saveDatabase();
+      this.emitChange('product_deleted', { id });
       return true;
     }
     return false;
@@ -780,6 +896,7 @@ class BikieDatabase {
     };
     this.data.categories.push(newCat);
     this.saveDatabase();
+    this.emitChange('category_created', newCat);
     return newCat;
   }
 
@@ -791,6 +908,7 @@ class BikieDatabase {
       ...updates,
     };
     this.saveDatabase();
+    this.emitChange('category_updated', this.data.categories[idx]);
     return this.data.categories[idx];
   }
 
@@ -799,6 +917,7 @@ class BikieDatabase {
     this.data.categories = this.data.categories.filter((c) => c.id !== id);
     if (this.data.categories.length !== len) {
       this.saveDatabase();
+      this.emitChange('category_deleted', { id });
       return true;
     }
     return false;
@@ -863,6 +982,8 @@ class BikieDatabase {
     }
 
     this.saveDatabase();
+    this.emitChange('order_created', newOrder);
+    this.emitChange('inventory_updated', { reason: 'order_created', items: newOrder.items });
     return newOrder;
   }
 
@@ -875,6 +996,7 @@ class BikieDatabase {
     }
     this.data.orders[idx].updated_at = new Date().toISOString();
     this.saveDatabase();
+    this.emitChange('order_updated', this.data.orders[idx]);
     return this.data.orders[idx];
   }
 
@@ -887,6 +1009,7 @@ class BikieDatabase {
       updated_at: new Date().toISOString(),
     };
     this.saveDatabase();
+    this.emitChange('order_updated', this.data.orders[idx]);
     return this.data.orders[idx];
   }
 
@@ -894,7 +1017,10 @@ class BikieDatabase {
     const prevLen = this.data.orders.length;
     this.data.orders = this.data.orders.filter((o) => o.id !== id);
     const deleted = this.data.orders.length < prevLen;
-    if (deleted) this.saveDatabase();
+    if (deleted) {
+      this.saveDatabase();
+      this.emitChange('order_deleted', { id });
+    }
     return deleted;
   }
 
@@ -912,6 +1038,7 @@ class BikieDatabase {
     };
     this.data.sales.unshift(newSale);
     this.saveDatabase();
+    this.emitChange('sale_created', newSale);
     return newSale;
   }
 
@@ -925,6 +1052,7 @@ class BikieDatabase {
       updated_at: new Date().toISOString(),
     };
     this.saveDatabase();
+    this.emitChange('sale_updated', this.data.sales[idx]);
     return this.data.sales[idx];
   }
 
@@ -933,7 +1061,10 @@ class BikieDatabase {
     const prevLen = this.data.sales.length;
     this.data.sales = this.data.sales.filter((s: any) => s.id !== id);
     const deleted = this.data.sales.length < prevLen;
-    if (deleted) this.saveDatabase();
+    if (deleted) {
+      this.saveDatabase();
+      this.emitChange('sale_deleted', { id });
+    }
     return deleted;
   }
 
@@ -949,6 +1080,7 @@ class BikieDatabase {
       updated_at: new Date().toISOString(),
     };
     this.saveDatabase();
+    this.emitChange('settings_updated', this.data.settings);
     return this.data.settings;
   }
 
@@ -960,6 +1092,7 @@ class BikieDatabase {
   public createCashRegister(reg: any): any {
     this.data.cash_registers.unshift(reg);
     this.saveDatabase();
+    this.emitChange('cash_register_created', reg);
     return reg;
   }
 
@@ -968,6 +1101,7 @@ class BikieDatabase {
     if (idx === -1) return null;
     this.data.cash_registers[idx] = { ...this.data.cash_registers[idx], ...updates };
     this.saveDatabase();
+    this.emitChange('cash_register_updated', this.data.cash_registers[idx]);
     return this.data.cash_registers[idx];
   }
 
@@ -978,6 +1112,7 @@ class BikieDatabase {
   public createCashMovement(mov: any): any {
     this.data.cash_movements.unshift(mov);
     this.saveDatabase();
+    this.emitChange('cash_movement_created', mov);
     return mov;
   }
 
@@ -989,6 +1124,7 @@ class BikieDatabase {
   public addInventoryMovement(mov: any): any {
     this.data.inventory_movements.unshift(mov);
     this.saveDatabase();
+    this.emitChange('inventory_movement_created', mov);
     return mov;
   }
 
@@ -1000,6 +1136,7 @@ class BikieDatabase {
   public saveSchoolPacks(packs: any[]) {
     this.data.school_packs = packs;
     this.saveDatabase();
+    this.emitChange('school_packs_updated', packs);
   }
 
   public getSchoolLists(): any[] {
@@ -1009,6 +1146,7 @@ class BikieDatabase {
   public saveSchoolLists(lists: any[]) {
     this.data.school_lists = lists;
     this.saveDatabase();
+    this.emitChange('school_lists_updated', lists);
   }
 
   // --- OFFERS & COUPONS ---
@@ -1024,6 +1162,7 @@ class BikieDatabase {
     };
     this.data.offers.unshift(newOffer);
     this.saveDatabase();
+    this.emitChange('offer_created', newOffer);
     return newOffer;
   }
 
@@ -1036,6 +1175,7 @@ class BikieDatabase {
       ...updates,
     };
     this.saveDatabase();
+    this.emitChange('offer_updated', this.data.offers[idx]);
     return this.data.offers[idx];
   }
 
@@ -1044,13 +1184,17 @@ class BikieDatabase {
     const prevLen = this.data.offers.length;
     this.data.offers = this.data.offers.filter((o: any) => o.id !== id);
     const deleted = this.data.offers.length < prevLen;
-    if (deleted) this.saveDatabase();
+    if (deleted) {
+      this.saveDatabase();
+      this.emitChange('offer_deleted', { id });
+    }
     return deleted;
   }
 
   public saveOffers(offers: any[]) {
     this.data.offers = offers;
     this.saveDatabase();
+    this.emitChange('offers_updated', offers);
   }
 
   public getCoupons(): any[] {
@@ -1060,6 +1204,7 @@ class BikieDatabase {
   public saveCoupons(coupons: any[]) {
     this.data.coupons = coupons;
     this.saveDatabase();
+    this.emitChange('coupons_updated', coupons);
   }
 
   // --- SUPPLIERS ---
@@ -1070,6 +1215,7 @@ class BikieDatabase {
   public saveSuppliers(suppliers: any[]) {
     this.data.suppliers = suppliers;
     this.saveDatabase();
+    this.emitChange('suppliers_updated', suppliers);
   }
 
   // --- EXPENSES ---
@@ -1086,6 +1232,7 @@ class BikieDatabase {
     };
     this.data.expenses.unshift(newExpense);
     this.saveDatabase();
+    this.emitChange('expense_created', newExpense);
     return newExpense;
   }
 
@@ -1098,6 +1245,7 @@ class BikieDatabase {
       ...updates,
     };
     this.saveDatabase();
+    this.emitChange('expense_updated', this.data.expenses[idx]);
     return this.data.expenses[idx];
   }
 
@@ -1106,13 +1254,17 @@ class BikieDatabase {
     const prevLen = this.data.expenses.length;
     this.data.expenses = this.data.expenses.filter((e: any) => e.id !== id);
     const deleted = this.data.expenses.length < prevLen;
-    if (deleted) this.saveDatabase();
+    if (deleted) {
+      this.saveDatabase();
+      this.emitChange('expense_deleted', { id });
+    }
     return deleted;
   }
 
   public saveExpenses(expenses: any[]) {
     this.data.expenses = expenses;
     this.saveDatabase();
+    this.emitChange('expenses_updated', expenses);
   }
 
   // --- SERVICES ---
@@ -1129,6 +1281,7 @@ class BikieDatabase {
     };
     this.data.services.push(newService);
     this.saveDatabase();
+    this.emitChange('service_created', newService);
     return newService;
   }
 
@@ -1141,6 +1294,7 @@ class BikieDatabase {
       ...updates,
     };
     this.saveDatabase();
+    this.emitChange('service_updated', this.data.services[idx]);
     return this.data.services[idx];
   }
 
@@ -1149,13 +1303,17 @@ class BikieDatabase {
     const prevLen = this.data.services.length;
     this.data.services = this.data.services.filter((s: any) => s.id !== id);
     const deleted = this.data.services.length < prevLen;
-    if (deleted) this.saveDatabase();
+    if (deleted) {
+      this.saveDatabase();
+      this.emitChange('service_deleted', { id });
+    }
     return deleted;
   }
 
   public saveServices(services: any[]) {
     this.data.services = services;
     this.saveDatabase();
+    this.emitChange('services_updated', services);
   }
 
   // --- AI SCANS ---
@@ -1166,7 +1324,53 @@ class BikieDatabase {
   public addAiScan(scan: any): any {
     this.data.ai_scans.unshift(scan);
     this.saveDatabase();
+    this.emitChange('ai_scan_created', scan);
     return scan;
+  }
+
+  // --- SQL & JSON GENERATORS FOR SECURE USER CREATION ---
+  public generateUserSql(user: { id?: string; name: string; email: string; phone?: string; role: string; points?: number; plainPassword: string }): string {
+    const { hash, salt } = hashPassword(user.plainPassword);
+    const id = user.id || `usr-${Date.now()}`;
+    const points = user.points || 0;
+    const phone = user.phone || '';
+    const now = new Date().toISOString();
+    return `-- SQL Insertion Statement for Bikie PostgreSQL / MySQL / SQLite Database
+INSERT INTO users (id, name, email, phone, password_hash, salt, role, points, created_at)
+VALUES (
+  '${id}',
+  '${user.name.replace(/'/g, "''")}',
+  '${user.email.trim().toLowerCase()}',
+  '${phone}',
+  '${hash}',
+  '${salt}',
+  '${user.role}',
+  ${points},
+  '${now}'
+)
+ON CONFLICT (email) DO UPDATE 
+SET password_hash = EXCLUDED.password_hash,
+    salt = EXCLUDED.salt,
+    role = EXCLUDED.role,
+    name = EXCLUDED.name,
+    phone = EXCLUDED.phone;`;
+  }
+
+  public generateUserJson(user: { id?: string; name: string; email: string; phone?: string; role: string; points?: number; plainPassword: string }): string {
+    const { hash, salt } = hashPassword(user.plainPassword);
+    const id = user.id || `usr-${Date.now()}`;
+    const record = {
+      id,
+      name: user.name,
+      email: user.email.trim().toLowerCase(),
+      phone: user.phone || '',
+      password_hash: hash,
+      salt,
+      role: user.role,
+      points: user.points || 0,
+      created_at: new Date().toISOString(),
+    };
+    return JSON.stringify(record, null, 2);
   }
 }
 

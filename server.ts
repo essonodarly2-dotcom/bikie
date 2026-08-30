@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
 import { db } from './server/db.js';
 
@@ -14,8 +15,81 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
+// Security & Hardening Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// --- RATE LIMITING / BRUTE FORCE PROTECTION ---
+interface LoginAttempt {
+  count: number;
+  lastAttempt: number;
+  lockedUntil: number;
+}
+const loginAttempts = new Map<string, LoginAttempt>();
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_PERIOD_MS = 15 * 60 * 1000; // 15 minutes lockout
+
+function checkRateLimit(key: string): { allowed: boolean; waitMinutes?: number } {
+  const record = loginAttempts.get(key);
+  if (!record) return { allowed: true };
+
+  const now = Date.now();
+  if (record.lockedUntil > now) {
+    const remainingMin = Math.ceil((record.lockedUntil - now) / 60000);
+    return { allowed: false, waitMinutes: remainingMin };
+  }
+
+  // Reset if last attempt was over lockout period ago
+  if (now - record.lastAttempt > LOCKOUT_PERIOD_MS) {
+    loginAttempts.delete(key);
+    return { allowed: true };
+  }
+
+  return { allowed: true };
+}
+
+function recordFailedLogin(key: string): void {
+  const now = Date.now();
+  const record = loginAttempts.get(key) || { count: 0, lastAttempt: now, lockedUntil: 0 };
+  record.count += 1;
+  record.lastAttempt = now;
+  if (record.count >= MAX_FAILED_ATTEMPTS) {
+    record.lockedUntil = now + LOCKOUT_PERIOD_MS;
+    console.warn(`[SECURITY] IP/Account ${key} locked out due to repeated failed logins.`);
+  }
+  loginAttempts.set(key, record);
+}
+
+function clearFailedLogin(key: string): void {
+  loginAttempts.delete(key);
+}
+
+// Input sanitizer to prevent XSS / injection attacks
+function sanitizeInput(str: unknown): string {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>]/g, '').trim();
+}
+
+// Lazy initialize Supabase server client for DB-level rate limiting & logging
+let serverSupabase: ReturnType<typeof createClient> | null = null;
+function getServerSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key || !url.startsWith('https://') || url.includes('placeholder')) {
+    return null;
+  }
+  if (!serverSupabase) {
+    serverSupabase = createClient(url, key);
+  }
+  return serverSupabase;
+}
 
 // Lazy initialize Gemini AI client
 let aiClient: GoogleGenAI | null = null;
@@ -36,6 +110,44 @@ function getGeminiClient(): GoogleGenAI | null {
   }
   return aiClient;
 }
+
+// ==========================================
+// REAL-TIME DATABASE SSE STREAM (LIVE SYNC)
+// ==========================================
+app.get('/api/realtime/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  // Send immediate initial handshake
+  res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+
+  const changeListener = (eventPayload: { type: string; data: any }) => {
+    try {
+      res.write(`data: ${JSON.stringify(eventPayload)}\n\n`);
+    } catch (err) {
+      console.error('Error broadcasting SSE event:', err);
+    }
+  };
+
+  db.on('change', changeListener);
+
+  // Keep-alive heartbeat every 25 seconds to prevent browser/proxy timeout
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: heartbeat ${Date.now()}\n\n`);
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    db.removeListener('change', changeListener);
+    res.end();
+  });
+});
 
 // Health check and DB status
 app.get('/api/health', (req, res) => {
@@ -65,28 +177,81 @@ app.get('/api/db/status', (req, res) => {
 });
 
 // ==========================================
-// AUTHENTICATION ROUTES (STRICT DB VALIDATION)
+// AUTHENTICATION ROUTES (STRICT DB VALIDATION & RATE LIMITING)
 // ==========================================
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, identifier, password, pin } = req.body;
-    const loginUser = email || identifier;
-    const credential = password || pin;
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown-client';
+    const email = sanitizeInput(req.body.email || req.body.identifier);
+    const password = typeof req.body.password === 'string' ? req.body.password.trim() : (typeof req.body.pin === 'string' ? req.body.pin.trim() : '');
 
-    if (!loginUser || !credential) {
+    const rateKey = `${ip}:${email.toLowerCase()}`;
+    const rateCheck = checkRateLimit(rateKey);
+
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: `Demasiados intentos fallidos. Por seguridad, la cuenta está bloqueada temporalmente. Intenta nuevamente en ${rateCheck.waitMinutes} minutos.`,
+      });
+    }
+
+    // Check DB-level rate limiting in Supabase if configured
+    const sb: any = getServerSupabase();
+    if (sb) {
+      try {
+        const { data: isAllowed, error: rpcError } = await sb.rpc('check_login_rate_limit', {
+          p_ip: ip,
+          p_email: email || null,
+          p_max_attempts: 5,
+          p_window_minutes: 15,
+        });
+        if (!rpcError && isAllowed === false) {
+          return res.status(429).json({
+            success: false,
+            error: 'Demasiados intentos fallidos registrados en la base de datos. Por seguridad, el acceso está bloqueado temporalmente por 15 minutos.',
+          });
+        }
+      } catch (sbErr) {
+        console.warn('Supabase rate limit check fallback to memory:', sbErr);
+      }
+    }
+
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
         error: 'Debes proporcionar tu correo electrónico y tu clave/PIN.',
       });
     }
 
-    const authResult = db.authenticateUser(loginUser, credential);
+    const authResult = db.authenticateUser(email, password);
 
     if (!authResult.success) {
+      recordFailedLogin(rateKey);
+      if (sb) {
+        try {
+          await sb.rpc('record_login_attempt', {
+            p_ip: ip,
+            p_email: email,
+            p_success: false,
+          });
+        } catch {}
+      }
       return res.status(401).json({
         success: false,
         error: authResult.error || 'Credenciales incorrectas o usuario no registrado en la base de datos.',
       });
+    }
+
+    // Clear failed login attempts counter on success
+    clearFailedLogin(rateKey);
+    if (sb) {
+      try {
+        await sb.rpc('record_login_attempt', {
+          p_ip: ip,
+          p_email: email,
+          p_success: true,
+        });
+      } catch {}
     }
 
     res.json({
@@ -97,6 +262,41 @@ app.post('/api/auth/login', (req, res) => {
   } catch (err: any) {
     console.error('Error in /api/auth/login:', err);
     res.status(500).json({ success: false, error: 'Error del servidor al procesar el login' });
+  }
+});
+
+// Endpoint to generate SQL and JSON code for inserting legitimate users
+app.post('/api/auth/users/generate-code', (req, res) => {
+  try {
+    const { name, email, phone, role, password, points } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, error: 'Nombre, correo y contraseña son requeridos' });
+    }
+
+    const userData = {
+      name: sanitizeInput(name),
+      email: sanitizeInput(email).toLowerCase(),
+      phone: sanitizeInput(phone || ''),
+      role: role || 'admin',
+      points: Number(points) || 0,
+      plainPassword: String(password).trim(),
+    };
+
+    const sqlStatement = db.generateUserSql(userData);
+    const jsonSnippet = db.generateUserJson(userData);
+
+    res.json({
+      success: true,
+      sql: sqlStatement,
+      json: jsonSnippet,
+      user_summary: {
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

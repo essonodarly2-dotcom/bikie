@@ -1,4 +1,24 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  Product,
+  Category,
+  Order,
+  Offer,
+  Coupon,
+  SchoolPack,
+  SchoolList,
+  Supplier,
+  Purchase,
+  CashRegister,
+  CashMovement,
+  InventoryMovement,
+  Sale,
+  UserProfile,
+  StoreSettings,
+  Expense,
+  ServiceItem,
+  ActivityLog,
+} from '../types';
 
 const getEnv = (key: string): string => {
   if (typeof process !== 'undefined' && process.env?.[key]) {
@@ -10,59 +30,73 @@ const getEnv = (key: string): string => {
   return '';
 };
 
-const supabaseUrl = getEnv('VITE_SUPABASE_URL');
-const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 
-export const supabase = supabaseUrl && supabaseAnonKey 
-  ? createClient(supabaseUrl, supabaseAnonKey) 
+export const isSupabaseConfigured = Boolean(
+  supabaseUrl && 
+  supabaseAnonKey && 
+  supabaseUrl.startsWith('https://') &&
+  !supabaseUrl.includes('placeholder')
+);
+
+export const supabase: SupabaseClient | null = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
+      },
+    })
   : null;
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
-
+// ==============================================================================
+// COMPLETE POSTGRESQL / SUPABASE PRODUCTION SCHEMA FOR BIKIE PAPELERÍA
+// ==============================================================================
 export const BIKIE_COMPLETE_SQL_SCHEMA = `-- ==============================================================================
--- BIKIE — SISTEMA INTEGRAL DE PAPELERÍA & LIBRERÍA (MALABO, GUINEA ECUATORIAL)
--- ESQUEMA COMPLETO DE BASE DE DATOS POSTGRESQL / SUPABASE CON SEED DATA
--- Moneda Oficial: XAF (Franco CFA BEAC)
+-- BIKIE PAPELERÍA & LIBRERÍA (MALABO, GUINEA ECUATORIAL)
+-- ESQUEMA DE BASE DE DATOS POSTGRESQL / SUPABASE DE PRODUCCIÓN
+-- Moneda: XAF (Franco CFA BEAC) | Teléfono: 222213126 | Ubicación: Paraíso, Malabo
 -- ==============================================================================
 
 -- 1. Extensiones necesarias
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
--- 2. Enumerados del Sistema
-DO $$ BEGIN
-    CREATE TYPE user_role_type AS ENUM ('admin', 'employee', 'inventory_manager', 'customer');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- 2. Configuración y datos generales de la tienda
+CREATE TABLE IF NOT EXISTS public.store_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    name TEXT NOT NULL DEFAULT 'BIKIE',
+    slogan TEXT DEFAULT 'Todo lo que necesitas para estudiar, trabajar y crear',
+    description TEXT DEFAULT 'Papelería, librería, material escolar, oficina y servicios de copistería en Malabo.',
+    phone TEXT DEFAULT '222213126',
+    whatsapp TEXT DEFAULT '222213126',
+    email TEXT DEFAULT 'contacto@bikie-papeleria.com',
+    address TEXT DEFAULT 'Paraiso, cerca de banje, Malabo, Guinea Ecuatorial',
+    city TEXT DEFAULT 'Malabo',
+    opening_hours TEXT DEFAULT 'Lunes a Sábado: 08:00 - 19:30',
+    currency TEXT DEFAULT 'XAF',
+    currency_symbol TEXT DEFAULT 'FCFA',
+    free_shipping_min NUMERIC(12, 2) DEFAULT 25000,
+    banner_headline TEXT DEFAULT 'Todo lo que necesitas para estudiar, trabajar y crear.',
+    banner_subheadline TEXT DEFAULT 'Papelería profesional con tecnología inteligente para facilitar tu día a día.',
+    points_per_1000_xaf INTEGER DEFAULT 10,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-DO $$ BEGIN
-    CREATE TYPE order_status_type AS ENUM ('pending', 'confirmed', 'preparing', 'ready_for_pickup', 'shipped', 'delivered', 'cancelled');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Insertar configuración inicial por defecto si no existe
+INSERT INTO public.store_settings (id, name, slogan, phone, whatsapp, address, city)
+VALUES (1, 'BIKIE', 'Todo lo que necesitas para estudiar, trabajar y crear', '222213126', '222213126', 'Paraiso, cerca de banje, Malabo, Guinea Ecuatorial', 'Malabo')
+ON CONFLICT (id) DO NOTHING;
 
-DO $$ BEGIN
-    CREATE TYPE payment_method_type AS ENUM ('store', 'transfer', 'online', 'other');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE product_status_type AS ENUM ('active', 'draft', 'out_of_stock');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE offer_type AS ENUM ('percentage', 'fixed', 'special_price', '2x1', '3x2', 'pack');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE inventory_movement_type AS ENUM ('purchase', 'sale', 'return', 'adjustment', 'manual_in', 'manual_out');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
--- 3. Tabla de Perfiles y Personal (Staff & Roles)
+-- 3. Tabla de Perfil Administrativo (Solo 1 administrador/propietario)
 CREATE TABLE IF NOT EXISTS public.profiles (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT UNIQUE NOT NULL,
-    phone TEXT,
-    role user_role_type DEFAULT 'customer',
-    points INTEGER DEFAULT 0,
-    avatar_url TEXT,
+    name TEXT NOT NULL DEFAULT 'María Lidia (Propietaria)',
+    phone TEXT DEFAULT '+240 222 213 126',
+    role TEXT NOT NULL DEFAULT 'admin' CHECK (role = 'admin'),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -73,7 +107,7 @@ CREATE TABLE IF NOT EXISTS public.categories (
     name TEXT NOT NULL,
     slug TEXT UNIQUE NOT NULL,
     description TEXT,
-    icon TEXT,
+    icon TEXT DEFAULT 'Folder',
     image TEXT,
     display_order INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -86,15 +120,15 @@ CREATE TABLE IF NOT EXISTS public.products (
     slug TEXT UNIQUE NOT NULL,
     description TEXT,
     category_id TEXT REFERENCES public.categories(id) ON DELETE SET NULL,
-    brand TEXT NOT NULL,
+    brand TEXT NOT NULL DEFAULT 'BIKIE',
     sku TEXT UNIQUE NOT NULL,
-    barcode TEXT UNIQUE,
+    barcode TEXT,
     purchase_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
     sale_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
     previous_price NUMERIC(12, 2),
     stock INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
     min_stock INTEGER NOT NULL DEFAULT 5,
-    status product_status_type DEFAULT 'active',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draft', 'out_of_stock')),
     is_featured BOOLEAN DEFAULT FALSE,
     is_new BOOLEAN DEFAULT FALSE,
     is_offer BOOLEAN DEFAULT FALSE,
@@ -105,36 +139,38 @@ CREATE TABLE IF NOT EXISTS public.products (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. Packs Escolares Predefinidos
-CREATE TABLE IF NOT EXISTS public.school_packs (
+CREATE INDEX IF NOT EXISTS idx_products_category ON public.products(category_id);
+CREATE INDEX IF NOT EXISTS idx_products_sku ON public.products(sku);
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
+CREATE INDEX IF NOT EXISTS idx_products_status ON public.products(status);
+
+-- 6. Servicios de Copistería, Documentos y Bebidas
+CREATE TABLE IF NOT EXISTS public.services (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    school_level TEXT NOT NULL,
-    grade TEXT NOT NULL,
-    description TEXT,
+    category TEXT NOT NULL DEFAULT 'copies' CHECK (category IN ('copies', 'documents', 'printing', 'juices', 'other')),
     price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-    original_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-    image TEXT,
-    items JSONB NOT NULL DEFAULT '[]'::jsonb,
-    is_popular BOOLEAN DEFAULT FALSE,
+    unit TEXT NOT NULL DEFAULT 'unidad',
+    description TEXT,
+    icon TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. Pedidos de Clientes (Orders)
+-- 7. Pedidos Online de Clientes (Sin requerir login previo)
 CREATE TABLE IF NOT EXISTS public.orders (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
-    customer_id TEXT,
     customer_name TEXT NOT NULL,
-    customer_email TEXT NOT NULL,
+    customer_email TEXT,
     customer_phone TEXT NOT NULL,
-    delivery_type TEXT DEFAULT 'pickup',
+    delivery_type TEXT DEFAULT 'pickup' CHECK (delivery_type IN ('pickup', 'delivery')),
     delivery_address TEXT,
     city TEXT DEFAULT 'Malabo',
     notes TEXT,
-    status order_status_type DEFAULT 'pending',
-    payment_method payment_method_type DEFAULT 'store',
-    payment_status TEXT DEFAULT 'unpaid',
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'preparing', 'ready_for_pickup', 'shipped', 'delivered', 'cancelled')),
+    payment_method TEXT DEFAULT 'store' CHECK (payment_method IN ('store', 'transfer', 'online', 'other')),
+    payment_status TEXT DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'paid', 'refunded')),
     subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
     discount NUMERIC(12, 2) DEFAULT 0,
     coupon_code TEXT,
@@ -144,101 +180,34 @@ CREATE TABLE IF NOT EXISTS public.orders (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. Ofertas y Promociones
-CREATE TABLE IF NOT EXISTS public.offers (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    image TEXT,
-    type offer_type DEFAULT 'percentage',
-    discount_value NUMERIC(12, 2) NOT NULL,
-    product_ids TEXT[] DEFAULT '{}',
-    category_ids TEXT[] DEFAULT '{}',
-    start_date DATE NOT NULL,
-    end_date DATE NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+CREATE INDEX IF NOT EXISTS idx_orders_phone ON public.orders(customer_phone);
+CREATE INDEX IF NOT EXISTS idx_orders_code ON public.orders(code);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
 
--- 9. Cupones de Descuento
-CREATE TABLE IF NOT EXISTS public.coupons (
-    id TEXT PRIMARY KEY,
-    code TEXT UNIQUE NOT NULL,
-    description TEXT,
-    discount_type TEXT DEFAULT 'percent',
-    discount_value NUMERIC(12, 2) NOT NULL,
-    min_purchase NUMERIC(12, 2) DEFAULT 0,
-    max_uses INTEGER DEFAULT 100,
-    uses_count INTEGER DEFAULT 0,
-    start_date DATE NOT NULL,
-    end_date DATE NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 10. Kardex y Movimientos de Inventario
-CREATE TABLE IF NOT EXISTS public.inventory_movements (
-    id TEXT PRIMARY KEY,
-    product_id TEXT REFERENCES public.products(id) ON DELETE CASCADE,
-    product_name TEXT NOT NULL,
-    type inventory_movement_type NOT NULL,
-    quantity INTEGER NOT NULL,
-    previous_stock INTEGER NOT NULL,
-    new_stock INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    user_name TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 11. Ventas Mostrador (POS) & Servicios
+-- 8. Ventas Mostrador (POS)
 CREATE TABLE IF NOT EXISTS public.sales (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
-    type TEXT DEFAULT 'pos',
+    type TEXT DEFAULT 'pos' CHECK (type IN ('pos', 'online')),
     customer_name TEXT DEFAULT 'Cliente Mostrador',
     customer_phone TEXT,
-    items JSONB NOT NULL,
-    subtotal NUMERIC(12, 2) NOT NULL,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
     discount NUMERIC(12, 2) DEFAULT 0,
-    total NUMERIC(12, 2) NOT NULL,
-    payment_method payment_method_type DEFAULT 'store',
-    cashier_name TEXT NOT NULL,
+    total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    payment_method TEXT DEFAULT 'store',
+    cashier_name TEXT NOT NULL DEFAULT 'María Lidia (Administradora)',
     notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    status TEXT DEFAULT 'completed' CHECK (status IN ('completed', 'refunded', 'cancelled')),
+    refund_reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 12. Servicios de Impresión, Copias y Gestiones (Services)
-CREATE TABLE IF NOT EXISTS public.services (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    category TEXT NOT NULL DEFAULT 'fotocopia',
-    price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-    unit TEXT NOT NULL DEFAULT 'unidad',
-    description TEXT,
-    icon TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 13. Control de Gastos Operativos (Expenses)
-CREATE TABLE IF NOT EXISTS public.expenses (
-    id TEXT PRIMARY KEY,
-    category TEXT NOT NULL,
-    description TEXT NOT NULL,
-    amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
-    payment_method TEXT DEFAULT 'cash',
-    date DATE NOT NULL DEFAULT CURRENT_DATE,
-    receipt_number TEXT,
-    supplier_name TEXT,
-    user_name TEXT NOT NULL,
-    status TEXT DEFAULT 'paid',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 14. Módulo de Caja y Arqueo (Cash Register & Shifts)
+-- 9. Control de Caja y Arqueos Diarios
 CREATE TABLE IF NOT EXISTS public.cash_registers (
     id TEXT PRIMARY KEY,
-    opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    opened_at TIMESTAMPTZ DEFAULT NOW(),
     closed_at TIMESTAMPTZ,
     initial_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
     total_sales NUMERIC(12, 2) NOT NULL DEFAULT 0,
@@ -247,30 +216,59 @@ CREATE TABLE IF NOT EXISTS public.cash_registers (
     expected_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
     counted_amount NUMERIC(12, 2),
     difference NUMERIC(12, 2),
-    cashier_name TEXT NOT NULL,
-    status TEXT DEFAULT 'open',
+    cashier_name TEXT NOT NULL DEFAULT 'María Lidia (Administradora)',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     notes TEXT
 );
 
 CREATE TABLE IF NOT EXISTS public.cash_movements (
     id TEXT PRIMARY KEY,
-    cash_register_id TEXT REFERENCES public.cash_registers(id) ON DELETE CASCADE,
-    type TEXT NOT NULL,
-    amount NUMERIC(12, 2) NOT NULL,
+    register_id TEXT REFERENCES public.cash_registers(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('sale', 'in', 'out', 'return')),
+    amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
     reason TEXT NOT NULL,
-    user_name TEXT NOT NULL,
+    cashier_name TEXT NOT NULL DEFAULT 'María Lidia (Administradora)',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 15. Proveedores y Órdenes de Compra
+-- 10. Gastos Operativos de la Papelería
+CREATE TABLE IF NOT EXISTS public.expenses (
+    id TEXT PRIMARY KEY,
+    concept TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('rent', 'utilities', 'salaries', 'supplies', 'maintenance', 'transport', 'taxes', 'other')),
+    amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    beneficiary TEXT,
+    payment_method TEXT DEFAULT 'cash',
+    registered_by TEXT NOT NULL DEFAULT 'María Lidia (Administradora)',
+    notes TEXT,
+    receipt_url TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. Movimientos de Inventario (Kardex)
+CREATE TABLE IF NOT EXISTS public.inventory_movements (
+    id TEXT PRIMARY KEY,
+    product_id TEXT REFERENCES public.products(id) ON DELETE CASCADE,
+    product_name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('purchase', 'sale', 'return', 'adjustment', 'manual_in', 'manual_out', 'initial')),
+    quantity INTEGER NOT NULL,
+    previous_stock INTEGER NOT NULL,
+    new_stock INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    user_name TEXT NOT NULL DEFAULT 'María Lidia (Administradora)',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 12. Proveedores y Compras
 CREATE TABLE IF NOT EXISTS public.suppliers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     company TEXT,
     phone TEXT,
     email TEXT,
-    website TEXT,
     address TEXT,
+    website TEXT,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -280,33 +278,74 @@ CREATE TABLE IF NOT EXISTS public.purchases (
     code TEXT UNIQUE NOT NULL,
     supplier_id TEXT REFERENCES public.suppliers(id) ON DELETE SET NULL,
     supplier_name TEXT NOT NULL,
-    items JSONB NOT NULL,
-    total NUMERIC(12, 2) NOT NULL,
-    status TEXT DEFAULT 'pending',
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'cancelled')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     received_at TIMESTAMPTZ
 );
 
--- 16. Historial de Escaneos de Listas Escolares con IA
-CREATE TABLE IF NOT EXISTS public.ai_scans (
+-- 13. Packs y Listas Escolares
+CREATE TABLE IF NOT EXISTS public.school_packs (
     id TEXT PRIMARY KEY,
-    customer_name TEXT,
-    customer_phone TEXT,
-    image_url TEXT,
-    raw_text TEXT,
-    detected_items_count INTEGER DEFAULT 0,
-    matched_items_count INTEGER DEFAULT 0,
-    confidence_avg NUMERIC(5, 2) DEFAULT 0,
-    total_estimated NUMERIC(12, 2) DEFAULT 0,
+    name TEXT NOT NULL,
+    description TEXT,
+    grade_level TEXT NOT NULL,
+    price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    original_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    image TEXT,
+    badge TEXT,
     items JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 17. Registro de Auditoría y Actividad del Personal
+CREATE TABLE IF NOT EXISTS public.school_lists (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    grade_level TEXT NOT NULL,
+    institution TEXT,
+    description TEXT,
+    is_published BOOLEAN DEFAULT TRUE,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. Ofertas y Cupones
+CREATE TABLE IF NOT EXISTS public.offers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    image TEXT,
+    type TEXT NOT NULL,
+    discount_value NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    product_ids TEXT[] DEFAULT '{}',
+    category_ids TEXT[] DEFAULT '{}',
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE NOT NULL,
+    status TEXT DEFAULT 'active' CHECK (status IN ('scheduled', 'active', 'paused', 'finished')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.coupons (
+    id TEXT PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    description TEXT,
+    discount_type TEXT NOT NULL CHECK (discount_type IN ('percent', 'fixed')),
+    discount_value NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    min_purchase NUMERIC(12, 2) DEFAULT 0,
+    max_uses INTEGER DEFAULT 100,
+    uses_count INTEGER DEFAULT 0,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 15. Auditoría de Actividad Administrativa
 CREATE TABLE IF NOT EXISTS public.activity_logs (
     id TEXT PRIMARY KEY,
-    user_name TEXT NOT NULL,
-    user_role TEXT NOT NULL,
+    user_name TEXT NOT NULL DEFAULT 'María Lidia (Administradora)',
+    user_role TEXT NOT NULL DEFAULT 'admin',
     action TEXT NOT NULL,
     entity TEXT,
     entity_id TEXT,
@@ -314,214 +353,542 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 18. Configuración de Tienda BIKIE
-CREATE TABLE IF NOT EXISTS public.store_settings (
-    id INTEGER PRIMARY KEY DEFAULT 1,
-    name TEXT NOT NULL DEFAULT 'BIKIE',
-    slogan TEXT DEFAULT 'Todo lo que necesitas para estudiar, trabajar y crear',
-    phone TEXT DEFAULT '222213126',
-    whatsapp TEXT DEFAULT '222213126',
-    email TEXT DEFAULT 'contacto@bikie-papeleria.com',
-    address TEXT DEFAULT 'Paraiso, cerca de banje, Malabo, Guinea Ecuatorial',
-    city TEXT DEFAULT 'Malabo',
-    opening_hours TEXT DEFAULT 'Lunes a Sábado: 08:00 - 19:30',
-    currency TEXT DEFAULT 'XAF',
-    currency_symbol TEXT DEFAULT 'FCFA',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+-- 16. Eventos y Visitas Anónimas (Respetando Privacidad)
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_name TEXT NOT NULL,
+    page TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ==============================================================================
--- SEED DATA INICIAL (PRODUCTOS, CATEGORÍAS, PERSONAL Y CONFIGURACIÓN)
+-- ROW LEVEL SECURITY (RLS) POLICIES (IDEMPOTENT & SAFE TO RE-RUN)
 -- ==============================================================================
-
--- Configuración
-INSERT INTO public.store_settings (id, name, slogan, phone, whatsapp, email, address, city, currency, currency_symbol)
-VALUES (1, 'BIKIE', 'Todo lo que necesitas para estudiar, trabajar y crear', '222213126', '222213126', 'contacto@bikie-papeleria.com', 'Paraiso, cerca de banje, Malabo, Guinea Ecuatorial', 'Malabo', 'XAF', 'FCFA')
-ON CONFLICT (id) DO UPDATE SET 
-    address = EXCLUDED.address,
-    phone = EXCLUDED.phone,
-    whatsapp = EXCLUDED.whatsapp,
-    updated_at = NOW();
-
--- Usuario Administrador Real BIKIE (Propietaria)
-INSERT INTO public.profiles (id, name, email, phone, role, points) VALUES
-('usr-tia-admin-01', 'Propietaria BIKIE (Tía)', 'propietaria@bikie.gq', '+240 222 111 000', 'admin', 1500)
-ON CONFLICT (id) DO UPDATE SET 
-    name = EXCLUDED.name,
-    email = EXCLUDED.email,
-    role = EXCLUDED.role;
-
--- Categorías
-INSERT INTO public.categories (id, name, slug, description, icon, display_order) VALUES
-('cat-escolar', 'Material escolar', 'material-escolar', 'Todo lo necesario para el colegio, instituto y universidad', 'GraduationCap', 1),
-('cat-oficina', 'Oficina', 'oficina', 'Suministros profesionales y ergonomía para tu espacio de trabajo', 'Briefcase', 2),
-('cat-escritura', 'Escritura', 'escritura', 'Bolígrafos, plumas, portaminas, rotuladores y marcadores', 'PenTool', 3),
-('cat-cuadernos', 'Cuadernos', 'cuadernos', 'Cuadernos espiral, libretas cosidas, agendas y blocs', 'BookOpen', 4),
-('cat-bellasartes', 'Bellas artes & Creatividad', 'bellas-artes', 'Pinturas acrílicas, óleos, lienzos, pinceles y modelado', 'Palette', 5),
-('cat-mochilas', 'Mochilas & Estuches', 'mochilas-estuches', 'Mochilas ergonómicas, estuches triples y portadocumentos', 'Backpack', 6),
-('cat-papeleria', 'Papel & Cartulinas', 'papel-cartulinas', 'Folios multifunción A4/A3, cartulinas de colores y papel charol', 'FileText', 7),
-('cat-tecnologia', 'Tecnología escolar', 'tecnologia-escolar', 'Calculadoras científicas, memorias USB y accesorios', 'Laptop', 8)
-ON CONFLICT (id) DO NOTHING;
-
--- Índices de Rendimiento
-CREATE INDEX IF NOT EXISTS idx_products_category ON public.products(category_id);
-CREATE INDEX IF NOT EXISTS idx_products_brand ON public.products(brand);
-CREATE INDEX IF NOT EXISTS idx_products_sku ON public.products(sku);
-CREATE INDEX IF NOT EXISTS idx_orders_customer ON public.orders(customer_phone);
-CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
-CREATE INDEX IF NOT EXISTS idx_orders_code ON public.orders(code);
-CREATE INDEX IF NOT EXISTS idx_inventory_product ON public.inventory_movements(product_id);
-CREATE INDEX IF NOT EXISTS idx_sales_created ON public.sales(created_at);
-
--- ==============================================================================
--- POLÍTICAS DE ACCESO (ROW LEVEL SECURITY)
--- ==============================================================================
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.store_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cash_registers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cash_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inventory_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_packs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.school_lists ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.offers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.coupons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
 
-DO $$ BEGIN
-    CREATE POLICY "Public Read Products" ON public.products FOR SELECT USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- ACCESO PÚBLICO DE LECTURA (Catálogo, servicios, configuración, ofertas para clientes sin login)
+DROP POLICY IF EXISTS "Public Read Settings" ON public.store_settings;
+CREATE POLICY "Public Read Settings" ON public.store_settings FOR SELECT USING (true);
 
-DO $$ BEGIN
-    CREATE POLICY "Public Read Categories" ON public.categories FOR SELECT USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Public Read Categories" ON public.categories;
+CREATE POLICY "Public Read Categories" ON public.categories FOR SELECT USING (true);
 
-DO $$ BEGIN
-    CREATE POLICY "Public Read School Packs" ON public.school_packs FOR SELECT USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Public Read Active Products" ON public.products;
+CREATE POLICY "Public Read Active Products" ON public.products FOR SELECT USING (status = 'active' OR auth.role() = 'authenticated');
 
-DO $$ BEGIN
-    CREATE POLICY "Public Insert Orders" ON public.orders FOR INSERT WITH CHECK (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Public Read Active Services" ON public.services;
+CREATE POLICY "Public Read Active Services" ON public.services FOR SELECT USING (is_active = true OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Public Read School Packs" ON public.school_packs;
+CREATE POLICY "Public Read School Packs" ON public.school_packs FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read School Lists" ON public.school_lists;
+CREATE POLICY "Public Read School Lists" ON public.school_lists FOR SELECT USING (is_published = true OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Public Read Active Offers" ON public.offers;
+CREATE POLICY "Public Read Active Offers" ON public.offers FOR SELECT USING (status = 'active' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Public Read Active Coupons" ON public.coupons;
+CREATE POLICY "Public Read Active Coupons" ON public.coupons FOR SELECT USING (is_active = true OR auth.role() = 'authenticated');
+
+-- ACCESO PÚBLICO PARA CREAR PEDIDOS Y ENVIAR ANALÍTICA ANÓNIMA
+DROP POLICY IF EXISTS "Public Insert Orders" ON public.orders;
+CREATE POLICY "Public Insert Orders" ON public.orders FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Track Orders By Phone Or Code" ON public.orders;
+CREATE POLICY "Public Track Orders By Phone Or Code" ON public.orders FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Orders" ON public.orders;
+CREATE POLICY "Public Read Orders" ON public.orders FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Insert Analytics" ON public.analytics_events;
+CREATE POLICY "Public Insert Analytics" ON public.analytics_events FOR INSERT WITH CHECK (true);
+
+-- ACCESO TOTAL PARA EL ADMINISTRADOR AUTENTICADO
+DROP POLICY IF EXISTS "Admin Full Access Settings" ON public.store_settings;
+DROP POLICY IF EXISTS "Admin Full Settings" ON public.store_settings;
+CREATE POLICY "Admin Full Access Settings" ON public.store_settings FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Profiles" ON public.profiles;
+CREATE POLICY "Admin Full Access Profiles" ON public.profiles FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Categories" ON public.categories;
+DROP POLICY IF EXISTS "Admin Full Categories" ON public.categories;
+CREATE POLICY "Admin Full Access Categories" ON public.categories FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Products" ON public.products;
+DROP POLICY IF EXISTS "Admin Full Products" ON public.products;
+CREATE POLICY "Admin Full Access Products" ON public.products FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Services" ON public.services;
+CREATE POLICY "Admin Full Access Services" ON public.services FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Orders" ON public.orders;
+DROP POLICY IF EXISTS "Admin Full Orders" ON public.orders;
+CREATE POLICY "Admin Full Access Orders" ON public.orders FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Sales" ON public.sales;
+DROP POLICY IF EXISTS "Admin Full Sales" ON public.sales;
+CREATE POLICY "Admin Full Access Sales" ON public.sales FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Cash" ON public.cash_registers;
+CREATE POLICY "Admin Full Access Cash" ON public.cash_registers FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Cash Movements" ON public.cash_movements;
+CREATE POLICY "Admin Full Access Cash Movements" ON public.cash_movements FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Expenses" ON public.expenses;
+CREATE POLICY "Admin Full Access Expenses" ON public.expenses FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Inventory" ON public.inventory_movements;
+CREATE POLICY "Admin Full Access Inventory" ON public.inventory_movements FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Suppliers" ON public.suppliers;
+CREATE POLICY "Admin Full Access Suppliers" ON public.suppliers FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Purchases" ON public.purchases;
+CREATE POLICY "Admin Full Access Purchases" ON public.purchases FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access School Packs" ON public.school_packs;
+CREATE POLICY "Admin Full Access School Packs" ON public.school_packs FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access School Lists" ON public.school_lists;
+CREATE POLICY "Admin Full Access School Lists" ON public.school_lists FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Offers" ON public.offers;
+CREATE POLICY "Admin Full Access Offers" ON public.offers FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Coupons" ON public.coupons;
+CREATE POLICY "Admin Full Access Coupons" ON public.coupons FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Full Access Logs" ON public.activity_logs;
+CREATE POLICY "Admin Full Access Logs" ON public.activity_logs FOR ALL USING (auth.role() = 'authenticated');
+
+-- ==============================================================================
+-- RATE LIMITING EN AUTENTICACIÓN (PREVENCIÓN DE ATAQUES DE FUERZA BRUTA)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.login_attempts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ip_address TEXT NOT NULL,
+    email TEXT,
+    attempt_time TIMESTAMPTZ DEFAULT NOW(),
+    success BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time ON public.login_attempts(ip_address, attempt_time);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_email_time ON public.login_attempts(email, attempt_time);
+
+-- Función para verificar si una IP/Email ha excedido el límite de intentos (5 intentos en 15 minutos)
+CREATE OR REPLACE FUNCTION public.check_login_rate_limit(
+    p_ip TEXT,
+    p_email TEXT DEFAULT NULL,
+    p_max_attempts INT DEFAULT 5,
+    p_window_minutes INT DEFAULT 15
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_failed_attempts INT;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_failed_attempts
+    FROM public.login_attempts
+    WHERE (ip_address = p_ip OR (p_email IS NOT NULL AND email = LOWER(TRIM(p_email))))
+      AND success = FALSE
+      AND attempt_time > (NOW() - (p_window_minutes || ' minutes')::INTERVAL);
+
+    IF v_failed_attempts >= p_max_attempts THEN
+        RETURN FALSE; -- Bloqueado por Rate Limit
+    END IF;
+
+    RETURN TRUE; -- Permitido
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Función para registrar intento de login y auto-limpieza
+CREATE OR REPLACE FUNCTION public.record_login_attempt(
+    p_ip TEXT,
+    p_email TEXT,
+    p_success BOOLEAN
+)
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO public.login_attempts (ip_address, email, success, attempt_time)
+    VALUES (p_ip, LOWER(TRIM(p_email)), p_success, NOW());
+
+    -- Si fue exitoso, limpiar intentos fallidos anteriores de esa IP o email
+    IF p_success THEN
+        DELETE FROM public.login_attempts
+        WHERE (ip_address = p_ip OR email = LOWER(TRIM(p_email)))
+          AND success = FALSE;
+    END IF;
+
+    -- Limpieza automática de registros antiguos (> 24 horas)
+    DELETE FROM public.login_attempts
+    WHERE attempt_time < (NOW() - INTERVAL '24 hours');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==============================================================================
+-- TRIGGER PARA SINCRONIZAR PERFIL DE ADMINISTRADOR CON SUPABASE AUTH
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_admin_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, name, phone, role)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'name', 'María Lidia (Propietaria)'),
+    COALESCE(NEW.raw_user_meta_data->>'phone', '+240 222 213 126'),
+    'admin'
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email,
+      name = EXCLUDED.name,
+      updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_admin_user();
 `;
 
-/**
- * Helper to download the complete database as a .sql file directly from browser
- */
-export const downloadDatabaseSchemaSql = () => {
-  const blob = new Blob([BIKIE_COMPLETE_SQL_SCHEMA], { type: 'text/sql;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', 'bikie_complete_database.sql');
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
+// Standalone SQL scripts for easy reference
+export const SUPABASE_RLS_PRODUCTS_CATEGORIES_SQL = `-- ==============================================================================
+-- POLÍTICAS RLS ESPECÍFICAS PARA 'products' Y 'categories'
+-- Lectura pública para todos los visitantes
+-- Escritura (INSERT, UPDATE, DELETE) exclusiva para Administrador autenticado
+-- ==============================================================================
 
-/**
- * Supabase Auth & Session Management Helpers
- */
-export const authService = {
-  signIn: async (email: string, password: string) => {
-    if (!supabase) {
-      return { success: false, error: 'Supabase no está configurado aún.' };
-    }
+-- 1. TABLA 'categories'
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public Read Categories" ON public.categories;
+CREATE POLICY "Public Read Categories" 
+ON public.categories FOR SELECT 
+USING (true);
+
+DROP POLICY IF EXISTS "Admin Insert Categories" ON public.categories;
+CREATE POLICY "Admin Insert Categories" 
+ON public.categories FOR INSERT 
+WITH CHECK (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Update Categories" ON public.categories;
+CREATE POLICY "Admin Update Categories" 
+ON public.categories FOR UPDATE 
+USING (auth.role() = 'authenticated') 
+WITH CHECK (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Delete Categories" ON public.categories;
+CREATE POLICY "Admin Delete Categories" 
+ON public.categories FOR DELETE 
+USING (auth.role() = 'authenticated');
+
+
+-- 2. TABLA 'products'
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public Read Active Products" ON public.products;
+CREATE POLICY "Public Read Active Products" 
+ON public.products FOR SELECT 
+USING (status = 'active' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Insert Products" ON public.products;
+CREATE POLICY "Admin Insert Products" 
+ON public.products FOR INSERT 
+WITH CHECK (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Update Products" ON public.products;
+CREATE POLICY "Admin Update Products" 
+ON public.products FOR UPDATE 
+USING (auth.role() = 'authenticated') 
+WITH CHECK (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admin Delete Products" ON public.products;
+CREATE POLICY "Admin Delete Products" 
+ON public.products FOR DELETE 
+USING (auth.role() = 'authenticated');
+`;
+
+export const SUPABASE_RATE_LIMIT_SQL = `-- ==============================================================================
+-- RATE LIMITING EN SUPABASE / POSTGRESQL (PREVENCIÓN DE FUERZA BRUTA)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.login_attempts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ip_address TEXT NOT NULL,
+    email TEXT,
+    attempt_time TIMESTAMPTZ DEFAULT NOW(),
+    success BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time ON public.login_attempts(ip_address, attempt_time);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_email_time ON public.login_attempts(email, attempt_time);
+
+CREATE OR REPLACE FUNCTION public.check_login_rate_limit(
+    p_ip TEXT,
+    p_email TEXT DEFAULT NULL,
+    p_max_attempts INT DEFAULT 5,
+    p_window_minutes INT DEFAULT 15
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_failed_attempts INT;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_failed_attempts
+    FROM public.login_attempts
+    WHERE (ip_address = p_ip OR (p_email IS NOT NULL AND email = LOWER(TRIM(p_email))))
+      AND success = FALSE
+      AND attempt_time > (NOW() - (p_window_minutes || ' minutes')::INTERVAL);
+
+    IF v_failed_attempts >= p_max_attempts THEN
+        RETURN FALSE;
+    END IF;
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.record_login_attempt(
+    p_ip TEXT,
+    p_email TEXT,
+    p_success BOOLEAN
+)
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO public.login_attempts (ip_address, email, success, attempt_time)
+    VALUES (p_ip, LOWER(TRIM(p_email)), p_success, NOW());
+
+    IF p_success THEN
+        DELETE FROM public.login_attempts
+        WHERE (ip_address = p_ip OR email = LOWER(TRIM(p_email)))
+          AND success = FALSE;
+    END IF;
+
+    DELETE FROM public.login_attempts
+    WHERE attempt_time < (NOW() - INTERVAL '24 hours');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+`;
+
+// Direct Supabase Service Helper
+export const supabaseDbService = {
+  // Products
+  async getProducts(): Promise<Product[]> {
+    if (!supabase) return [];
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password: password.trim(),
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      // Fetch profile from profiles table
-      if (data.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .single();
-
-        const userProfile = {
-          id: data.user.id,
-          email: data.user.email || email,
-          name: profile?.name || data.user.user_metadata?.name || 'Administradora BIKIE',
-          phone: profile?.phone || data.user.user_metadata?.phone || '+240 222 111 000',
-          role: (profile?.role || 'admin') as any,
-          points: profile?.points || 1500,
-          created_at: data.user.created_at,
-        };
-
-        return { success: true, user: userProfile, session: data.session };
-      }
-      return { success: false, error: 'Usuario no encontrado' };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Error al autenticar con Supabase' };
+      const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Product[];
+    } catch (err) {
+      console.error('Supabase getProducts error:', err);
+      return [];
     }
   },
 
-  signUp: async (email: string, password: string, name: string, phone?: string) => {
-    if (!supabase) {
-      return { success: false, error: 'Supabase no está configurado.' };
-    }
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password: password.trim(),
-        options: {
-          data: { name, phone },
-        },
-      });
-
-      if (error) return { success: false, error: error.message };
-      return { success: true, user: data.user, session: data.session };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Error en registro con Supabase' };
-    }
-  },
-
-  signOut: async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-  },
-
-  getSession: async () => {
+  async saveProduct(product: Partial<Product>): Promise<Product | null> {
     if (!supabase) return null;
     try {
-      const { data } = await supabase.auth.getSession();
-      return data.session;
-    } catch {
+      const { data, error } = await supabase.from('products').upsert(product).select().single();
+      if (error) throw error;
+      return data as Product;
+    } catch (err) {
+      console.error('Supabase saveProduct error:', err);
       return null;
     }
   },
 
-  onAuthStateChange: (callback: (user: any | null) => void) => {
-    if (!supabase) return () => {};
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+  async deleteProduct(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteProduct error:', err);
+      return false;
+    }
+  },
 
-        const userProfile = {
-          id: session.user.id,
-          email: session.user.email,
-          name: profile?.name || session.user.user_metadata?.name || 'Administradora BIKIE',
-          phone: profile?.phone || session.user.user_metadata?.phone || '+240 222 111 000',
-          role: (profile?.role || 'admin') as any,
-          points: profile?.points || 1500,
-          created_at: session.user.created_at,
-        };
-        callback(userProfile);
-      } else {
-        callback(null);
-      }
-    });
+  // Categories
+  async getCategories(): Promise<Category[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('categories').select('*').order('display_order', { ascending: true });
+      if (error) throw error;
+      return (data || []) as Category[];
+    } catch (err) {
+      console.error('Supabase getCategories error:', err);
+      return [];
+    }
+  },
 
-    return () => {
-      subscription.unsubscribe();
-    };
+  async saveCategory(category: Partial<Category>): Promise<Category | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('categories').upsert(category).select().single();
+      if (error) throw error;
+      return data as Category;
+    } catch (err) {
+      console.error('Supabase saveCategory error:', err);
+      return null;
+    }
+  },
+
+  // Orders
+  async getOrders(): Promise<Order[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Order[];
+    } catch (err) {
+      console.error('Supabase getOrders error:', err);
+      return [];
+    }
+  },
+
+  async createOrder(order: Partial<Order>): Promise<Order | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('orders').insert(order).select().single();
+      if (error) throw error;
+      return data as Order;
+    } catch (err) {
+      console.error('Supabase createOrder error:', err);
+      return null;
+    }
+  },
+
+  async updateOrderStatus(id: string, status: string, payment_status?: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const updates: any = { status, updated_at: new Date().toISOString() };
+      if (payment_status) updates.payment_status = payment_status;
+      const { error } = await supabase.from('orders').update(updates).eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase updateOrderStatus error:', err);
+      return false;
+    }
+  },
+
+  // Sales
+  async getSales(): Promise<Sale[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('sales').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Sale[];
+    } catch (err) {
+      console.error('Supabase getSales error:', err);
+      return [];
+    }
+  },
+
+  async createSale(sale: Partial<Sale>): Promise<Sale | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('sales').insert(sale).select().single();
+      if (error) throw error;
+      return data as Sale;
+    } catch (err) {
+      console.error('Supabase createSale error:', err);
+      return null;
+    }
+  },
+
+  // Services
+  async getServices(): Promise<ServiceItem[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('services').select('*').order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data || []) as ServiceItem[];
+    } catch (err) {
+      console.error('Supabase getServices error:', err);
+      return [];
+    }
+  },
+
+  // Expenses
+  async getExpenses(): Promise<Expense[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Expense[];
+    } catch (err) {
+      console.error('Supabase getExpenses error:', err);
+      return [];
+    }
+  },
+
+  async createExpense(expense: Partial<Expense>): Promise<Expense | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('expenses').insert(expense).select().single();
+      if (error) throw error;
+      return data as Expense;
+    } catch (err) {
+      console.error('Supabase createExpense error:', err);
+      return null;
+    }
+  },
+
+  // Settings
+  async getSettings(): Promise<StoreSettings | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('store_settings').select('*').eq('id', 1).single();
+      if (error) throw error;
+      return data as StoreSettings;
+    } catch (err) {
+      console.error('Supabase getSettings error:', err);
+      return null;
+    }
+  },
+
+  async updateSettings(settings: Partial<StoreSettings>): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('store_settings').update(settings).eq('id', 1);
+      return !error;
+    } catch (err) {
+      console.error('Supabase updateSettings error:', err);
+      return false;
+    }
   },
 };
 
+export function downloadDatabaseSchemaSql() {
+  const blob = new Blob([BIKIE_COMPLETE_SQL_SCHEMA], { type: 'text/sql;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'bikie_papeleria_schema.sql');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

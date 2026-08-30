@@ -34,6 +34,7 @@ import {
   AiScanRecord,
 } from './types';
 import { storageService } from './lib/storage';
+import { api } from './lib/api';
 import { formatXAF } from './utils/formatters';
 
 // Components
@@ -52,6 +53,8 @@ import { InvoicePrintModal } from './components/InvoicePrintModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { LoginModal } from './components/LoginModal';
 import { ClientOffersBanner } from './components/ClientOffersBanner';
+import { LegalModal, LegalDocType } from './components/LegalModal';
+import { CookieBanner } from './components/CookieBanner';
 
 const DEFAULT_GUEST_USER: UserProfile = {
   id: 'guest-customer',
@@ -77,32 +80,65 @@ export default function App() {
   const [users, setUsers] = useState<UserProfile[]>(storageService.getUsers());
   const [aiScans, setAiScans] = useState<AiScanRecord[]>(storageService.getAiScans());
 
-  // Real database initialization on mount
+  // Real database initialization and live real-time sync
   useEffect(() => {
-    storageService.syncWithDatabase().then((dbData) => {
-      if (dbData) {
-        if (dbData.settings) setSettings(dbData.settings);
-        if (dbData.categories && dbData.categories.length > 0) setCategories(dbData.categories);
-        if (dbData.products && dbData.products.length > 0) setProducts(dbData.products);
-        if (dbData.orders) setOrders(dbData.orders);
-        if (dbData.offers) setOffers(dbData.offers);
-        if (dbData.coupons) setCoupons(dbData.coupons);
-        if (dbData.school_packs) setSchoolPacks(dbData.school_packs);
-        if (dbData.school_lists) setSchoolLists(dbData.school_lists);
-        if (dbData.suppliers) setSuppliers(dbData.suppliers);
-        if (dbData.users && dbData.users.length > 0) setUsers(dbData.users);
-        if (dbData.ai_scans) setAiScans(dbData.ai_scans);
-      }
-    }).catch(console.error);
+    const refreshStateFromDb = () => {
+      storageService.syncWithDatabase().then((dbData) => {
+        if (dbData) {
+          if (dbData.settings) setSettings(dbData.settings);
+          if (dbData.categories && dbData.categories.length > 0) setCategories(dbData.categories);
+          if (dbData.products && dbData.products.length > 0) setProducts(dbData.products);
+          if (dbData.orders) setOrders(dbData.orders);
+          if (dbData.offers) setOffers(dbData.offers);
+          if (dbData.coupons) setCoupons(dbData.coupons);
+          if (dbData.school_packs) setSchoolPacks(dbData.school_packs);
+          if (dbData.school_lists) setSchoolLists(dbData.school_lists);
+          if (dbData.suppliers) setSuppliers(dbData.suppliers);
+          if (dbData.users && dbData.users.length > 0) setUsers(dbData.users);
+          if (dbData.ai_scans) setAiScans(dbData.ai_scans);
+        }
+      }).catch(console.error);
+    };
+
+    // Initial load
+    refreshStateFromDb();
+
+    // Subscribe to Server-Sent Events (SSE) for instant live DB updates across devices
+    const unsubscribe = api.subscribeToRealtime((event) => {
+      console.log('Real-time database event received:', event.type);
+      refreshStateFromDb();
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
-  // User State (Default to guest customer who doesn't need to sign up)
-  const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_GUEST_USER);
+  // User State (Restored from secure sessionStorage if unexpired, else guest)
+  const [currentUser, setCurrentUser] = useState<UserProfile>(() => storageService.getCurrentUser());
 
   // Active View State
   const [currentView, setCurrentView] = useState<
     'catalog' | 'school_lists' | 'tracking' | 'account' | 'checkout' | 'admin'
   >('catalog');
+
+  // Strict session expiration checker (30-minute security timeout)
+  useEffect(() => {
+    const sessionCheckInterval = setInterval(() => {
+      if (currentUser.id !== DEFAULT_GUEST_USER.id) {
+        const validatedUser = storageService.getCurrentUser();
+        if (validatedUser.id === DEFAULT_GUEST_USER.id) {
+          setCurrentUser(DEFAULT_GUEST_USER);
+          if (currentView === 'admin') {
+            setCurrentView('catalog');
+          }
+          showToast('🔒 La sesión de administración ha expirado por seguridad (30 min).');
+        }
+      }
+    }, 15000);
+
+    return () => clearInterval(sessionCheckInterval);
+  }, [currentUser, currentView]);
 
   // Filter & Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -122,6 +158,7 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
+  const [legalModalType, setLegalModalType] = useState<LegalDocType | null>(null);
 
   // Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -134,6 +171,7 @@ export default function App() {
   };
 
   const handleLogoutToGuest = () => {
+    storageService.clearAdminSession();
     setCurrentUser(DEFAULT_GUEST_USER);
     if (currentView === 'admin') {
       setCurrentView('catalog');
@@ -142,9 +180,10 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user: UserProfile) => {
+    storageService.setCurrentUser(user);
     setCurrentUser(user);
     showToast(`✓ Sesión iniciada: ${user.name} (${user.role})`);
-    if (user.role === 'admin' || user.role === 'employee' || user.role === 'inventory_manager') {
+    if (user.role === 'admin') {
       setCurrentView('admin');
     }
   };
@@ -740,9 +779,40 @@ export default function App() {
             </div>
           </div>
 
-          {/* Bottom copyright */}
+          {/* Bottom copyright and legal */}
           <div className="border-t border-slate-800/80 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-            <p>© {new Date().getFullYear()} BIKIE Papelería — Todos los derechos reservados.</p>
+            <div className="flex flex-wrap items-center gap-4">
+              <p>© {new Date().getFullYear()} BIKIE Papelería — Malabo, Guinea Ecuatorial.</p>
+              <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                <button
+                  onClick={() => setLegalModalType('privacy')}
+                  className="hover:text-red-400 underline transition-colors cursor-pointer"
+                >
+                  Privacidad
+                </button>
+                <span>·</span>
+                <button
+                  onClick={() => setLegalModalType('terms')}
+                  className="hover:text-red-400 underline transition-colors cursor-pointer"
+                >
+                  Términos
+                </button>
+                <span>·</span>
+                <button
+                  onClick={() => setLegalModalType('cookies')}
+                  className="hover:text-red-400 underline transition-colors cursor-pointer"
+                >
+                  Cookies
+                </button>
+                <span>·</span>
+                <button
+                  onClick={() => setLegalModalType('shipping')}
+                  className="hover:text-red-400 underline transition-colors cursor-pointer"
+                >
+                  Envíos
+                </button>
+              </div>
+            </div>
             <div className="flex items-center gap-3">
               <span>Moneda: <strong>Franco CFA (XAF)</strong></span>
               <span>·</span>
@@ -750,7 +820,7 @@ export default function App() {
                 onClick={() => setIsLoginModalOpen(true)}
                 className="text-slate-400 hover:text-red-400 font-medium underline cursor-pointer"
               >
-                Acceso Privado
+                Acceso Privado (Admin)
               </button>
             </div>
           </div>
@@ -844,6 +914,19 @@ export default function App() {
         availableUsers={users}
         onLoginSuccess={handleLoginSuccess}
         onLogoutToGuest={handleLogoutToGuest}
+      />
+
+      {legalModalType && (
+        <LegalModal
+          isOpen={true}
+          type={legalModalType}
+          settings={settings}
+          onClose={() => setLegalModalType(null)}
+        />
+      )}
+
+      <CookieBanner
+        onOpenLegal={(type) => setLegalModalType(type)}
       />
     </div>
   );

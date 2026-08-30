@@ -46,7 +46,7 @@ export interface BootstrapData {
 class BikieApiClient {
   private baseUrl = '';
 
-  // Auth / Login
+  // Auth / Login (Strict Database Backend Validation)
   async login(email: string, pinOrPassword: string): Promise<LoginResponse> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPin = pinOrPassword.trim();
@@ -57,69 +57,81 @@ class BikieApiClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail, pin: cleanPin, password: cleanPin }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success) {
-          return data;
-        }
+
+      const data = await res.json();
+      if (data && data.success) {
+        return data;
       }
+      return {
+        success: false,
+        error: data?.error || 'Credenciales inválidas o usuario no registrado en la base de datos.',
+      };
     } catch (err: any) {
-      console.warn('Backend API login unavailable (e.g. static hosting on Vercel), attempting fallback DB authentication:', err);
+      console.warn('Network / Server error during login:', err);
+      return {
+        success: false,
+        error: 'No se pudo conectar con el servidor de base de datos. Verifica tu conexión.',
+      };
     }
+  }
 
-    // Fallback: Client-side DB authentication (Guarantees 100% login success on Vercel static deployments & offline)
+  // Real-time Database Synchronization (Server-Sent Events)
+  subscribeToRealtime(onEvent: (event: { type: string; data?: any }) => void): () => void {
+    let eventSource: EventSource | null = null;
+    let reconnectTimeout: any = null;
+
+    const connect = () => {
+      try {
+        eventSource = new EventSource('/api/realtime/stream');
+
+        eventSource.onmessage = (e) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            onEvent(parsed);
+          } catch (err) {
+            console.error('Error parsing SSE event data:', err);
+          }
+        };
+
+        eventSource.onerror = (err) => {
+          console.warn('Real-time SSE connection lost, reconnecting in 5s...', err);
+          eventSource?.close();
+          reconnectTimeout = setTimeout(connect, 5000);
+        };
+      } catch (err) {
+        console.error('SSE initialization error:', err);
+        reconnectTimeout = setTimeout(connect, 5000);
+      }
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }
+
+  // Generate User SQL & JSON for Direct DB Insertion
+  async generateUserCode(userData: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: string;
+    password: string;
+    points?: number;
+  }): Promise<{ success: boolean; sql?: string; json?: string; error?: string }> {
     try {
-      const storedUsers = JSON.parse(localStorage.getItem('bikie_users_v1') || '[]');
-      const user = storedUsers.find(
-        (u: any) => u.email.toLowerCase() === cleanEmail || (cleanEmail === 'admin' && u.role === 'admin')
-      );
-
-      // Check against known admin accounts or stored user
-      const isAdminEmail =
-        cleanEmail === 'marialidia@bikie.gq' ||
-        cleanEmail === 'propietaria@bikie.gq' ||
-        cleanEmail === 'admin@bikie.gq' ||
-        cleanEmail === 'marialidia' ||
-        cleanEmail === 'propietaria' ||
-        cleanEmail === 'admin' ||
-        (user && user.role === 'admin');
-
-      const isCorrectPin = cleanPin === '1234' || (user && user.password && user.password === cleanPin);
-
-      if (isAdminEmail && (cleanPin === '1234' || isCorrectPin)) {
-        const adminUser: UserProfile = user || {
-          id: 'usr-marialidia-01',
-          email: cleanEmail.includes('@') ? cleanEmail : 'marialidia@bikie.gq',
-          name: cleanEmail === 'admin@bikie.gq' ? 'Administrador General BIKIE' : 'María Lidia (Propietaria BIKIE)',
-          phone: '+240 222 111 000',
-          role: 'admin',
-          points: 2500,
-          created_at: new Date().toISOString(),
-        };
-        return {
-          success: true,
-          message: 'Autenticación exitosa (Base de datos BIKIE)',
-          user: adminUser,
-        };
-      }
-
-      if (user && isCorrectPin) {
-        return {
-          success: true,
-          message: 'Autenticación exitosa',
-          user,
-        };
-      }
-
-      return {
-        success: false,
-        error: 'Usuario o contraseña incorrectos. Para la propietaria María Lidia usa marialidia@bikie.gq con PIN: 1234.',
-      };
-    } catch (fallbackErr) {
-      return {
-        success: false,
-        error: 'Error al verificar credenciales en la base de datos.',
-      };
+      const res = await fetch(`${this.baseUrl}/api/auth/users/generate-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error al generar código' };
     }
   }
 
@@ -240,6 +252,20 @@ class BikieApiClient {
     }
   }
 
+  async saveProducts(products: Product[]): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/products`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(products),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('Error saving products in DB:', err);
+      return false;
+    }
+  }
+
   // Categories
   async getCategories(): Promise<Category[]> {
     try {
@@ -355,6 +381,20 @@ class BikieApiClient {
       return data.success;
     } catch (err) {
       console.error('Error deleting order in DB:', err);
+      return false;
+    }
+  }
+
+  async saveOrders(orders: Order[]): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/orders`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orders),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('Error saving orders in DB:', err);
       return false;
     }
   }
@@ -497,6 +537,45 @@ class BikieApiClient {
       console.error('Error creating inventory movement in DB:', err);
       return null;
     }
+  }
+
+  async createInventoryMovement(mov: Partial<InventoryMovement>): Promise<InventoryMovement | null> {
+    return this.addInventoryMovement(mov);
+  }
+
+  // Suppliers
+  async createSupplier(sup: Partial<Supplier>): Promise<Supplier | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/suppliers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sup),
+      });
+      const data = await res.json();
+      return data.supplier || null;
+    } catch (err) {
+      console.error('Error creating supplier in DB:', err);
+      return null;
+    }
+  }
+
+  // Activity Log
+  async logActivity(log: any): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/activity-logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(log),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('Error recording activity log in DB:', err);
+      return false;
+    }
+  }
+
+  async createAiScan(scan: Partial<AiScanRecord>): Promise<AiScanRecord | null> {
+    return this.saveAiScan(scan);
   }
 
   // School lists & packs
