@@ -31,19 +31,19 @@ const getEnv = (key: string): string => {
   return '';
 };
 
-// Frontend environment variables (NEVER expose service_role key to browser)
-const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
-const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
+// Dynamic credentials resolver
+let runtimeSupabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL') || 'https://poenflmsotdalxzylvlz.supabase.co';
+let runtimeSupabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBvZW5mbG1zb3RkYWx4enlsdmx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MDQ1MDcsImV4cCI6MjEwMzQ4MDUwN30.RsLhMK18QUammp3kLIBmhfuA0bjp60M3gUepErpG2DM';
 
 export const isSupabaseConfigured = Boolean(
-  supabaseUrl && 
-  supabaseAnonKey && 
-  supabaseUrl.startsWith('https://') &&
-  !supabaseUrl.includes('placeholder')
+  runtimeSupabaseUrl && 
+  runtimeSupabaseAnonKey && 
+  runtimeSupabaseUrl.startsWith('https://') &&
+  !runtimeSupabaseUrl.includes('placeholder')
 );
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+  ? createClient(runtimeSupabaseUrl, runtimeSupabaseAnonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,

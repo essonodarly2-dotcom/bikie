@@ -80,8 +80,8 @@ function sanitizeInput(str: unknown): string {
 // Lazy initialize Supabase server client for DB-level rate limiting & logging & real persistence
 let serverSupabase: ReturnType<typeof createClient> | null = null;
 function getServerSupabase() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://poenflmsotdalxzylvlz.supabase.co';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBvZW5mbG1zb3RkYWx4enlsdmx6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzkwNDUwNywiZXhwIjoyMTAzNDgwNTA3fQ.Vl1ub2lCAN5BOlIVsBn27UZUe3eSEu9ouK9PBZiS0M0' || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key || !url.startsWith('https://') || url.includes('placeholder')) {
     return null;
   }
@@ -177,6 +177,22 @@ app.get('/api/health', (req, res) => {
       categories_count: db.getCategories().length,
       orders_count: db.getOrders().length,
     },
+  });
+});
+
+app.get('/api/config', (req, res) => {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+  res.json({
+    supabaseUrl,
+    supabaseAnonKey,
+    isSupabaseConfigured: Boolean(
+      supabaseUrl &&
+      supabaseAnonKey &&
+      supabaseUrl.startsWith('https://') &&
+      !supabaseUrl.includes('placeholder')
+    ),
+    aiAvailable: Boolean(process.env.GEMINI_API_KEY),
   });
 });
 

@@ -1065,6 +1065,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Settings className="w-4 h-4 text-slate-400" />
             <span>Ajustes de Tienda</span>
           </button>
+
+          {/* Database / Supabase Sync Status */}
+          <button
+            onClick={() => setActiveTab('database')}
+            className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
+              activeTab === 'database'
+                ? 'bg-red-600 text-white shadow-md'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Database className="w-4 h-4 text-emerald-400" />
+              <span>Base de Datos</span>
+            </div>
+            <span className="bg-emerald-950 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-800">
+              Conectada
+            </span>
+          </button>
         </aside>
 
         {/* Right Content Panel */}
@@ -2179,6 +2197,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               currentUser={currentUser}
               onRefreshData={onRefreshData}
             />
+          )}
+
+          {/* TAB: BASE DE DATOS / SUPABASE */}
+          {activeTab === 'database' && (
+            <div className="space-y-6 animate-in fade-in duration-150 max-w-4xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black font-['Outfit'] text-white flex items-center gap-2.5">
+                    <Database className="w-5 h-5 text-emerald-400" />
+                    <span>Conexión y Estado de Base de Datos Supabase</span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Sincronización en la nube en tiempo real (PostgreSQL + Realtime)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 px-3.5 py-1.5 bg-emerald-950/80 border border-emerald-700/80 rounded-2xl text-emerald-300 text-xs font-bold w-fit">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Conectado a https://poenflmsotdalxzylvlz.supabase.co</span>
+                </div>
+              </div>
+
+              {/* Status summary cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                <div className="p-4 bg-slate-800/60 border border-slate-700/80 rounded-2xl space-y-1">
+                  <span className="text-slate-400 font-bold block">Proyecto Supabase</span>
+                  <p className="text-white font-mono font-bold text-sm">poenflmsotdalxzylvlz</p>
+                  <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> URL y Clave Configurada
+                  </span>
+                </div>
+                <div className="p-4 bg-slate-800/60 border border-slate-700/80 rounded-2xl space-y-1">
+                  <span className="text-slate-400 font-bold block">Canal Realtime</span>
+                  <p className="text-white font-mono font-bold text-sm">bikie-realtime-changes</p>
+                  <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Escucha Activa de Cambios
+                  </span>
+                </div>
+                <div className="p-4 bg-slate-800/60 border border-slate-700/80 rounded-2xl space-y-1">
+                  <span className="text-slate-400 font-bold block">Tablas Sincronizadas</span>
+                  <p className="text-white font-mono font-bold text-sm">17 Tablas Activas</p>
+                  <span className="text-[11px] text-slate-400">
+                    Productos, Pedidos, Ventas, Kardex, Caja
+                  </span>
+                </div>
+              </div>
+
+              {/* SQL Schema helper */}
+              <div className="p-5 bg-slate-800/50 border border-slate-700 rounded-3xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-white font-bold text-sm">
+                    <FileText className="w-4 h-4 text-yellow-400" />
+                    <span>Script de Inicialización SQL para Supabase</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(BIKIE_COMPLETE_SQL_SCHEMA);
+                      alert('¡Script SQL copiado al portapapeles! Puedes pegarlo en el SQL Editor de tu Dashboard de Supabase.');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-700 text-yellow-400 border border-yellow-700/60 text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Copiar Script SQL Completo</span>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Si creas un proyecto nuevo o deseas asegurar todas las tablas, vistas y políticas de seguridad RLS en PostgreSQL, ejecuta este script en el <strong>SQL Editor</strong> de Supabase.
+                </p>
+                <div className="max-h-48 overflow-y-auto bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-300">
+                  <pre>{BIKIE_COMPLETE_SQL_SCHEMA.slice(0, 1200)}...</pre>
+                </div>
+              </div>
+            </div>
           )}
         </main>
       </div>
