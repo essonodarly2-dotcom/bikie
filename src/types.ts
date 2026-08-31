@@ -71,6 +71,13 @@ export interface OrderItem {
   total_price: number;
 }
 
+export interface OrderHistoryItem {
+  status: OrderStatus;
+  timestamp: string;
+  actor: string;
+  note?: string;
+}
+
 export interface Order {
   id: string;
   code: string; // e.g. "BIKIE-000001"
@@ -84,12 +91,20 @@ export interface Order {
   notes?: string;
   status: OrderStatus;
   payment_method: PaymentMethod;
-  payment_status: 'unpaid' | 'paid';
+  payment_status: 'unpaid' | 'paid' | 'refunded';
+  paid_at?: string;
+  paid_by?: string;
+  invoice_number?: string;
+  accepted_at?: string;
+  accepted_by?: string;
+  cancellation_reason?: string;
+  cancelled_at?: string;
   subtotal: number;
   discount: number;
   coupon_code?: string;
   total: number;
   items: OrderItem[];
+  history?: OrderHistoryItem[];
   created_at: string;
   updated_at?: string;
 }
@@ -169,7 +184,8 @@ export interface InventoryMovement {
 export interface Sale {
   id: string;
   code: string;
-  type: 'online' | 'pos';
+  type: 'online' | 'pos' | 'service' | 'order_charge';
+  order_id?: string;
   customer_name: string;
   customer_phone?: string;
   items: OrderItem[];
@@ -179,7 +195,10 @@ export interface Sale {
   payment_method: PaymentMethod;
   cashier_name: string;
   notes?: string;
+  status?: 'completed' | 'refunded' | 'cancelled';
+  refund_reason?: string;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface CashRegister {

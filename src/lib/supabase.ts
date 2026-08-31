@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS public.services (
 CREATE TABLE IF NOT EXISTS public.orders (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
+    customer_id TEXT,
     customer_name TEXT NOT NULL,
     customer_email TEXT,
     customer_phone TEXT NOT NULL,
@@ -206,24 +207,47 @@ CREATE TABLE IF NOT EXISTS public.orders (
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'preparing', 'ready_for_pickup', 'shipped', 'delivered', 'cancelled')),
     payment_method TEXT DEFAULT 'store' CHECK (payment_method IN ('store', 'transfer', 'online', 'other')),
     payment_status TEXT DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'paid', 'refunded')),
+    paid_at TIMESTAMPTZ,
+    paid_by TEXT,
+    invoice_number TEXT,
+    accepted_at TIMESTAMPTZ,
+    accepted_by TEXT,
+    cancellation_reason TEXT,
+    cancelled_at TIMESTAMPTZ,
     subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
     discount NUMERIC(12, 2) DEFAULT 0,
     coupon_code TEXT,
     total NUMERIC(12, 2) NOT NULL DEFAULT 0,
     items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    history JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Si la tabla ya existía, añadir columnas faltantes de forma segura
+DO $$ 
+BEGIN
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_id TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS paid_by TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS invoice_number TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS accepted_by TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_orders_phone ON public.orders(customer_phone);
 CREATE INDEX IF NOT EXISTS idx_orders_code ON public.orders(code);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
 
--- 8. Ventas Mostrador (POS)
+-- 8. Ventas Mostrador (POS) y Cobros de Pedidos
 CREATE TABLE IF NOT EXISTS public.sales (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
-    type TEXT DEFAULT 'pos' CHECK (type IN ('pos', 'online')),
+    type TEXT DEFAULT 'pos' CHECK (type IN ('pos', 'online', 'service', 'order_charge')),
+    order_id TEXT REFERENCES public.orders(id) ON DELETE SET NULL,
     customer_name TEXT DEFAULT 'Cliente Mostrador',
     customer_phone TEXT,
     items JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -238,6 +262,14 @@ CREATE TABLE IF NOT EXISTS public.sales (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Si la tabla sales ya existía, añadir columnas faltantes
+DO $$ 
+BEGIN
+    BEGIN ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS order_id TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS refund_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+END $$;
 
 -- 9. Control de Caja y Arqueos Diarios
 CREATE TABLE IF NOT EXISTS public.cash_registers (

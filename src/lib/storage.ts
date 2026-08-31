@@ -2,6 +2,8 @@ import {
   Product,
   Category,
   Order,
+  OrderItem,
+  PaymentMethod,
   Offer,
   Coupon,
   SchoolPack,
@@ -441,26 +443,330 @@ export const storageService = {
     orders.forEach((o) => supabaseDbService.createOrder(o).catch((e) => console.error(e)));
     api.saveOrders(orders).catch((e) => console.error(e));
   },
-  updateOrderStatus: (id: string, status: Order['status'], payment_status?: Order['payment_status']) => {
+  updateOrderStatus: (
+    id: string,
+    status: Order['status'],
+    payment_status?: Order['payment_status'],
+    actorName = 'María Lidia (Administradora)',
+    note?: string
+  ) => {
     const list = storageService.getOrders();
     const order = list.find((o) => o.id === id);
     if (order) {
+      const prevStatus = order.status;
       order.status = status;
       if (payment_status) order.payment_status = payment_status;
+      order.updated_at = new Date().toISOString();
+
+      if (!order.history) order.history = [];
+      order.history.push({
+        status,
+        timestamp: new Date().toISOString(),
+        actor: actorName,
+        note: note || `Cambio de estado: ${prevStatus} ➔ ${status}`,
+      });
+
       setItem(STORAGE_KEYS.ORDERS, list);
-      supabaseDbService.updateOrderStatus(id, status, payment_status).catch((e) => console.error(e));
-      api.updateOrderStatus(id, status, payment_status).catch((e) => console.error(e));
+      supabaseDbService.createOrder(order).catch((e) => console.error(e));
+      api.createOrder(order).catch((e) => console.error(e));
+
+      storageService.addActivityLog({
+        user_name: actorName,
+        user_role: 'admin',
+        action: `Actualizó estado del pedido ${order.code}`,
+        entity: 'order',
+        entity_id: order.id,
+        details: `Nuevo estado: ${status}${note ? ' (' + note + ')' : ''}`,
+      });
     }
+  },
+
+  acceptOrder: (id: string, actorName = 'María Lidia (Administradora)'): { success: boolean; error?: string } => {
+    const list = storageService.getOrders();
+    const order = list.find((o) => o.id === id);
+    if (!order) return { success: false, error: 'Pedido no encontrado' };
+
+    order.status = 'confirmed';
+    order.accepted_at = new Date().toISOString();
+    order.accepted_by = actorName;
+    order.updated_at = new Date().toISOString();
+
+    if (!order.history) order.history = [];
+    order.history.push({
+      status: 'confirmed',
+      timestamp: new Date().toISOString(),
+      actor: actorName,
+      note: 'Pedido aceptado y confirmado para preparación',
+    });
+
+    setItem(STORAGE_KEYS.ORDERS, list);
+    supabaseDbService.createOrder(order).catch((e) => console.error(e));
+    api.createOrder(order).catch((e) => console.error(e));
+
+    storageService.addActivityLog({
+      user_name: actorName,
+      user_role: 'admin',
+      action: `Aceptó pedido ${order.code}`,
+      entity: 'order',
+      entity_id: order.id,
+      details: `Pedido confirmado por ${actorName} - Total: ${order.total} FCFA`,
+    });
+
+    return { success: true };
+  },
+
+  cancelOrderAndRestock: (
+    id: string,
+    reason: string = 'Cancelado por administración',
+    actorName = 'María Lidia (Administradora)'
+  ): { success: boolean; error?: string } => {
+    const list = storageService.getOrders();
+    const order = list.find((o) => o.id === id);
+    if (!order) return { success: false, error: 'Pedido no encontrado' };
+    if (order.status === 'cancelled') return { success: false, error: 'El pedido ya está cancelado' };
+
+    // Restore stock for all items
+    const products = storageService.getProducts();
+    if (order.items && order.items.length > 0) {
+      for (const item of order.items) {
+        const prod = products.find((p) => p.id === item.product_id);
+        if (prod) {
+          const prev = prod.stock;
+          prod.stock = prod.stock + item.quantity;
+          if (prod.stock > 0 && prod.status === 'out_of_stock') prod.status = 'active';
+
+          const mov: InventoryMovement = {
+            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            product_id: prod.id,
+            product_name: prod.name,
+            type: 'return',
+            quantity: item.quantity,
+            previous_stock: prev,
+            new_stock: prod.stock,
+            reason: `Devolución de stock por cancelación de pedido ${order.code}: ${reason}`,
+            user_name: actorName,
+            created_at: new Date().toISOString(),
+          };
+          storageService.addInventoryMovement(mov);
+          supabaseDbService.saveProduct(prod).catch((e) => console.error(e));
+          api.updateProduct(prod.id, { stock: prod.stock, status: prod.status }).catch((e) => console.error(e));
+        }
+      }
+      setItem(STORAGE_KEYS.PRODUCTS, products);
+    }
+
+    order.status = 'cancelled';
+    order.cancellation_reason = reason;
+    order.cancelled_at = new Date().toISOString();
+    order.updated_at = new Date().toISOString();
+
+    if (!order.history) order.history = [];
+    order.history.push({
+      status: 'cancelled',
+      timestamp: new Date().toISOString(),
+      actor: actorName,
+      note: `Pedido cancelado: ${reason}. Stock reintegrado al inventario.`,
+    });
+
+    setItem(STORAGE_KEYS.ORDERS, list);
+    supabaseDbService.createOrder(order).catch((e) => console.error(e));
+    api.createOrder(order).catch((e) => console.error(e));
+
+    storageService.addActivityLog({
+      user_name: actorName,
+      user_role: 'admin',
+      action: `Canceló pedido ${order.code}`,
+      entity: 'order',
+      entity_id: order.id,
+      details: `Motivo: ${reason}. Stock devuelto al inventario.`,
+    });
+
+    return { success: true };
+  },
+
+  chargeOrder: (
+    id: string,
+    paymentMethod: Order['payment_method'] = 'store',
+    actorName = 'María Lidia (Administradora)',
+    notes?: string
+  ): { success: boolean; error?: string; sale?: Sale } => {
+    const list = storageService.getOrders();
+    const order = list.find((o) => o.id === id);
+    if (!order) return { success: false, error: 'Pedido no encontrado' };
+    if (order.payment_status === 'paid') return { success: false, error: 'Este pedido ya ha sido cobrado previamente' };
+
+    const invoiceNumber = `FAC-ORD-${order.code.replace('BIKIE-', '')}`;
+
+    order.payment_status = 'paid';
+    order.payment_method = paymentMethod;
+    order.paid_at = new Date().toISOString();
+    order.paid_by = actorName;
+    order.invoice_number = invoiceNumber;
+    order.updated_at = new Date().toISOString();
+
+    if (!order.history) order.history = [];
+    order.history.push({
+      status: order.status,
+      timestamp: new Date().toISOString(),
+      actor: actorName,
+      note: `Cobro registrado: ${order.total} FCFA (${paymentMethod}). Factura: ${invoiceNumber}`,
+    });
+
+    setItem(STORAGE_KEYS.ORDERS, list);
+    supabaseDbService.createOrder(order).catch((e) => console.error(e));
+    api.createOrder(order).catch((e) => console.error(e));
+
+    // Register sale
+    const sale: Sale = {
+      id: `sale-ord-${order.id}`,
+      code: invoiceNumber,
+      type: 'online',
+      order_id: order.id,
+      customer_name: order.customer_name,
+      customer_phone: order.customer_phone,
+      items: order.items,
+      subtotal: order.subtotal,
+      discount: order.discount,
+      total: order.total,
+      payment_method: paymentMethod,
+      cashier_name: actorName,
+      notes: notes ? `Cobro pedido ${order.code} - ${notes}` : `Cobro pedido ${order.code}`,
+      status: 'completed',
+      created_at: new Date().toISOString(),
+    };
+    storageService.saveSale(sale);
+
+    // If payment is in cash/store, update open cash register
+    if (paymentMethod === 'store') {
+      const openReg = storageService.getCurrentCashRegister();
+      if (openReg) {
+        openReg.total_sales = Number(openReg.total_sales || 0) + order.total;
+        openReg.total_in = Number(openReg.total_in || 0) + order.total;
+        openReg.expected_amount = Number(openReg.expected_amount || 0) + order.total;
+        storageService.saveCashRegister(openReg);
+
+        const movement: CashMovement = {
+          id: `csh-${Date.now()}`,
+          register_id: openReg.id,
+          type: 'sale',
+          amount: order.total,
+          reason: `Cobro Pedido ${order.code} (${order.customer_name})`,
+          cashier_name: actorName,
+          created_at: new Date().toISOString(),
+        };
+        storageService.addCashMovement(movement);
+      }
+    }
+
+    storageService.addActivityLog({
+      user_name: actorName,
+      user_role: 'admin',
+      action: `Cobró pedido ${order.code}`,
+      entity: 'order',
+      entity_id: order.id,
+      details: `Cobro de ${order.total} FCFA registrado con éxito (${paymentMethod}). Factura: ${invoiceNumber}`,
+    });
+
+    return { success: true, sale };
   },
 
   // Sales (POS & Online)
   getSales: (): Sale[] => getItem(STORAGE_KEYS.SALES, []),
   saveSale: (sale: Sale) => {
     const list = storageService.getSales();
-    list.unshift(sale);
+    const idx = list.findIndex((s) => s.id === sale.id);
+    if (idx >= 0) {
+      list[idx] = sale;
+    } else {
+      list.unshift(sale);
+    }
     setItem(STORAGE_KEYS.SALES, list);
     supabaseDbService.createSale(sale).catch((e) => console.error(e));
     api.createSale(sale).catch((e) => console.error(e));
+  },
+
+  // Register a POS Counter Sale with full stock deduction, movement, cash register update, and Supabase sync
+  registerPosSale: (
+    saleData: {
+      items: OrderItem[];
+      subtotal: number;
+      discount: number;
+      total: number;
+      payment_method: PaymentMethod;
+      customer_name?: string;
+      customer_phone?: string;
+      cashier_name?: string;
+      notes?: string;
+    }
+  ): { success: boolean; sale?: Sale; error?: string } => {
+    const cashier = saleData.cashier_name || 'María Lidia (Administradora)';
+    const customer = saleData.customer_name || 'Cliente Mostrador';
+
+    // 1. Deduct stock for all items
+    const stockRes = storageService.deductStock(
+      saleData.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+      `Venta mostrador POS: ${customer}`,
+      cashier
+    );
+    if (!stockRes.success) {
+      return { success: false, error: stockRes.error || 'Stock insuficiente' };
+    }
+
+    // 2. Generate unique sale code
+    const existingSales = storageService.getSales();
+    const saleCode = `BIK-POS-${(existingSales.length + 1).toString().padStart(6, '0')}`;
+
+    const newSale: Sale = {
+      id: `pos-${Date.now()}`,
+      code: saleCode,
+      type: 'pos',
+      customer_name: customer,
+      customer_phone: saleData.customer_phone,
+      items: saleData.items,
+      subtotal: saleData.subtotal,
+      discount: saleData.discount,
+      total: saleData.total,
+      payment_method: saleData.payment_method,
+      cashier_name: cashier,
+      notes: saleData.notes,
+      status: 'completed',
+      created_at: new Date().toISOString(),
+    };
+    storageService.saveSale(newSale);
+
+    // 3. Update cash register if cash
+    if (saleData.payment_method === 'store') {
+      const openReg = storageService.getCurrentCashRegister();
+      if (openReg) {
+        openReg.total_sales = Number(openReg.total_sales || 0) + newSale.total;
+        openReg.total_in = Number(openReg.total_in || 0) + newSale.total;
+        openReg.expected_amount = Number(openReg.expected_amount || 0) + newSale.total;
+        storageService.saveCashRegister(openReg);
+
+        const movement: CashMovement = {
+          id: `csh-${Date.now()}`,
+          register_id: openReg.id,
+          type: 'sale',
+          amount: newSale.total,
+          reason: `Venta POS #${newSale.code}`,
+          cashier_name: cashier,
+          created_at: new Date().toISOString(),
+        };
+        storageService.addCashMovement(movement);
+      }
+    }
+
+    // 4. Log activity
+    storageService.addActivityLog({
+      user_name: cashier,
+      user_role: 'admin',
+      action: `Registró venta mostrador POS ${newSale.code}`,
+      entity: 'sale',
+      entity_id: newSale.id,
+      details: `Venta ${newSale.code} por ${newSale.total} FCFA (${newSale.payment_method})`,
+    });
+
+    return { success: true, sale: newSale };
   },
 
   // Inventory Movements (Kardex)

@@ -47,6 +47,7 @@ import {
   Link,
   Image as ImageIcon,
   X,
+  XCircle,
   Coffee,
   Receipt,
   FileCheck,
@@ -58,6 +59,7 @@ import {
   Product,
   Category,
   Order,
+  PaymentMethod,
   Offer,
   Coupon,
   Supplier,
@@ -84,6 +86,8 @@ import { ServicesAndSalesManager } from './ServicesAndSalesManager';
 import { SalesHistoryAndReports } from './SalesHistoryAndReports';
 import { OffersManager } from './OffersManager';
 import { ExpensesManager } from './ExpensesManager';
+import { OrderDetailModal } from './OrderDetailModal';
+import { ChargeOrderModal } from './ChargeOrderModal';
 
 interface AdminDashboardProps {
   currentUser: UserProfile;
@@ -127,6 +131,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [categoryImageTab, setCategoryImageTab] = useState<'url' | 'file'>('url');
+
+  // Order Lifecycle & Modals State
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<Order | null>(null);
+  const [orderToCharge, setOrderToCharge] = useState<Order | null>(null);
+  const [isChargeModalOpen, setIsChargeModalOpen] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancelReasonInput, setCancelReasonInput] = useState('Cancelado a solicitud del cliente');
+  const [orderFilterStatus, setOrderFilterStatus] = useState<string>('all');
+  const [orderSearchTerm, setOrderSearchTerm] = useState('');
 
   // POS State
   const [posSearch, setPosSearch] = useState('');
@@ -175,19 +189,109 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const pendingOrdersCount = orders.filter((o) => o.status === 'pending' || o.status === 'preparing').length;
   const lowStockProducts = products.filter((p) => p.stock <= p.min_stock);
 
-  // Order Status Updater
+  // Order Lifecycle Handlers
   const handleUpdateOrderStatus = (orderId: string, newStatus: Order['status']) => {
-    const updated = orders.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o));
-    storageService.saveOrders(updated);
-    storageService.addActivityLog({
-      user_name: currentUser.name,
-      user_role: currentUser.role,
-      action: `Cambió estado de pedido ${orderId} a ${newStatus}`,
-      entity: 'order',
-      entity_id: orderId,
-      details: `Estado actualizado a ${newStatus}`,
-    });
+    storageService.updateOrderStatus(orderId, newStatus, undefined, currentUser.name);
     onRefreshData();
+  };
+
+  const handleAcceptOrder = (order: Order) => {
+    const res = storageService.acceptOrder(order.id, currentUser.name);
+    if (res.success) {
+      if (selectedOrderForDetail?.id === order.id) {
+        setSelectedOrderForDetail({
+          ...selectedOrderForDetail,
+          status: 'confirmed',
+          accepted_at: new Date().toISOString(),
+          accepted_by: currentUser.name,
+        });
+      }
+      onRefreshData();
+    } else {
+      alert(res.error || 'Error al aceptar el pedido');
+    }
+  };
+
+  const handlePrepareOrder = (order: Order) => {
+    storageService.updateOrderStatus(order.id, 'preparing', undefined, currentUser.name, 'Pedido puesto en preparación');
+    if (selectedOrderForDetail?.id === order.id) {
+      setSelectedOrderForDetail({ ...selectedOrderForDetail, status: 'preparing' });
+    }
+    onRefreshData();
+  };
+
+  const handleMarkReady = (order: Order) => {
+    storageService.updateOrderStatus(order.id, 'ready_for_pickup', undefined, currentUser.name, 'Pedido listo para entrega o recogida');
+    if (selectedOrderForDetail?.id === order.id) {
+      setSelectedOrderForDetail({ ...selectedOrderForDetail, status: 'ready_for_pickup' });
+    }
+    onRefreshData();
+  };
+
+  const handleMarkShipped = (order: Order) => {
+    storageService.updateOrderStatus(order.id, 'shipped', undefined, currentUser.name, 'Pedido despachado / en reparto');
+    if (selectedOrderForDetail?.id === order.id) {
+      setSelectedOrderForDetail({ ...selectedOrderForDetail, status: 'shipped' });
+    }
+    onRefreshData();
+  };
+
+  const handleMarkDelivered = (order: Order) => {
+    storageService.updateOrderStatus(order.id, 'delivered', undefined, currentUser.name, 'Pedido entregado al cliente');
+    if (selectedOrderForDetail?.id === order.id) {
+      setSelectedOrderForDetail({ ...selectedOrderForDetail, status: 'delivered' });
+    }
+    onRefreshData();
+  };
+
+  const handleOpenChargeModal = (order: Order) => {
+    setOrderToCharge(order);
+    setIsChargeModalOpen(true);
+  };
+
+  const handleConfirmChargeOrder = (order: Order, paymentMethod: PaymentMethod, notes?: string) => {
+    const res = storageService.chargeOrder(order.id, paymentMethod, currentUser.name, notes);
+    if (res.success) {
+      if (selectedOrderForDetail?.id === order.id) {
+        setSelectedOrderForDetail({
+          ...selectedOrderForDetail,
+          payment_status: 'paid',
+          payment_method: paymentMethod,
+          paid_at: new Date().toISOString(),
+          paid_by: currentUser.name,
+          invoice_number: res.sale?.code,
+        });
+      }
+      onRefreshData();
+    } else {
+      alert(res.error || 'Error al cobrar el pedido');
+    }
+  };
+
+  const handleOpenCancelModal = (order: Order) => {
+    setOrderToCancel(order);
+    setCancelReasonInput('Cancelado por administración / solicitud cliente');
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancelOrder = () => {
+    if (!orderToCancel) return;
+    const res = storageService.cancelOrderAndRestock(orderToCancel.id, cancelReasonInput, currentUser.name);
+    if (res.success) {
+      if (selectedOrderForDetail?.id === orderToCancel.id) {
+        setSelectedOrderForDetail({
+          ...selectedOrderForDetail,
+          status: 'cancelled',
+          cancellation_reason: cancelReasonInput,
+          cancelled_at: new Date().toISOString(),
+        });
+      }
+      setIsCancelModalOpen(false);
+      setOrderToCancel(null);
+      onRefreshData();
+    } else {
+      alert(res.error || 'Error al cancelar el pedido');
+    }
   };
 
   // WhatsApp Message to Customer for order updates
@@ -496,23 +600,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handlePosCheckout = () => {
     if (posCart.length === 0) return;
-    const total = posCart.reduce((s, i) => s + i.product.sale_price * i.quantity, 0);
+    const subtotal = posCart.reduce((s, i) => s + i.product.sale_price * i.quantity, 0);
+    const total = subtotal;
 
-    const newOrder: Order = {
-      id: `ord-pos-${Date.now()}`,
-      code: `POS-${Math.floor(100000 + Math.random() * 900000)}`,
-      customer_id: 'usr-tia-admin-01',
-      customer_name: posCustomerName || 'Venta Mostrador',
-      customer_email: 'ventas@bikie.gq',
-      customer_phone: '+240 222 111 000',
-      delivery_type: 'pickup',
-      city: 'Malabo',
-      status: 'delivered',
-      payment_method: posPaymentMethod,
-      payment_status: 'paid',
-      subtotal: total,
-      discount: 0,
-      total: total,
+    const result = storageService.registerPosSale({
       items: posCart.map((i) => ({
         product_id: i.product.id,
         product_name: i.product.name,
@@ -521,49 +612,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         unit_price: i.product.sale_price,
         total_price: i.product.sale_price * i.quantity,
       })),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      subtotal,
+      discount: 0,
+      total,
+      payment_method: posPaymentMethod,
+      customer_name: posCustomerName || 'Cliente Mostrador',
+      cashier_name: currentUser.name,
+      notes: 'Venta mostrador POS BIKIE',
+    });
+
+    if (!result.success) {
+      alert(`Error al procesar la venta POS: ${result.error}`);
+      return;
+    }
+
+    // Prepare representation for invoice printing
+    const orderRep: Order = {
+      id: result.sale!.id,
+      code: result.sale!.code,
+      customer_name: result.sale!.customer_name,
+      customer_phone: result.sale!.customer_phone || '+240 222 000 000',
+      customer_email: 'ventas@bikie.gq',
+      delivery_type: 'pickup',
+      city: 'Malabo',
+      status: 'delivered',
+      payment_method: result.sale!.payment_method,
+      payment_status: 'paid',
+      subtotal: result.sale!.subtotal,
+      discount: result.sale!.discount,
+      total: result.sale!.total,
+      items: result.sale!.items,
+      created_at: result.sale!.created_at,
     };
-
-    // Update stocks
-    const updatedProducts = products.map((p) => {
-      const sold = posCart.find((i) => i.product.id === p.id);
-      if (sold) {
-        const newStock = Math.max(0, p.stock - sold.quantity);
-        storageService.addInventoryMovement({
-          id: `mov-${Date.now()}-${p.id}`,
-          product_id: p.id,
-          product_name: p.name,
-          type: 'sale',
-          quantity: -sold.quantity,
-          previous_stock: p.stock,
-          new_stock: newStock,
-          reason: `Venta POS Mostrador #${newOrder.code}`,
-          user_name: currentUser.name,
-          created_at: new Date().toISOString(),
-        });
-        return { ...p, stock: newStock };
-      }
-      return p;
-    });
-
-    storageService.saveProducts(updatedProducts);
-    storageService.saveOrders([newOrder, ...orders]);
-    storageService.addActivityLog({
-      user_name: currentUser.name,
-      user_role: currentUser.role,
-      action: `Realizó venta en mostrador POS: ${newOrder.code}`,
-      entity: 'order',
-      entity_id: newOrder.id,
-      details: `Total: ${formatXAF(total)}, Método: ${posPaymentMethod}`,
-    });
 
     setPosCart([]);
     setPosCustomerName('Cliente Tienda');
-    setPosNotice(`¡Venta #${newOrder.code} completada con éxito (${formatXAF(total)})!`);
+    setPosNotice(`¡Venta #${result.sale!.code} completada con éxito (${formatXAF(total)})!`);
     setTimeout(() => setPosNotice(null), 4000);
-    // Automatically open generated invoice for printing / sending
-    onOpenInvoiceModal(newOrder);
+    onOpenInvoiceModal(orderRep);
     onRefreshData();
   };
 
@@ -1306,85 +1392,195 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                 <div>
                   <h2 className="text-xl font-black font-['Outfit'] text-white">
-                    Gestión Integral de Pedidos
+                    Gestión Integral de Pedidos (Supabase Realtime)
                   </h2>
                   <p className="text-xs text-slate-400">
-                    Cambio de estados, emisión de tickets/facturas y avisos por WhatsApp
+                    Aceptación, preparación, despacho, cobro, facturación y aviso por WhatsApp
                   </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 font-bold">
+                    {orders.length} pedidos registrados
+                  </span>
                 </div>
               </div>
 
+              {/* Filters and Search Toolbar */}
+              <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+                  {[
+                    { key: 'all', label: 'Todos' },
+                    { key: 'pending', label: 'Pendientes' },
+                    { key: 'confirmed', label: 'Confirmados' },
+                    { key: 'preparing', label: 'En Preparación' },
+                    { key: 'ready_for_pickup', label: 'Listos' },
+                    { key: 'shipped', label: 'Enviados' },
+                    { key: 'delivered', label: 'Entregados' },
+                    { key: 'cancelled', label: 'Cancelados' },
+                  ].map((tab) => {
+                    const count =
+                      tab.key === 'all'
+                        ? orders.length
+                        : orders.filter((o) => o.status === tab.key).length;
+                    return (
+                      <button
+                        key={tab.key}
+                        onClick={() => setOrderFilterStatus(tab.key)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                          orderFilterStatus === tab.key
+                            ? 'bg-red-600 text-white shadow-md shadow-red-950'
+                            : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        <span>{tab.label}</span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                            orderFilterStatus === tab.key
+                              ? 'bg-red-800 text-white'
+                              : 'bg-slate-900 text-slate-400'
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="relative min-w-[240px]">
+                  <input
+                    type="text"
+                    value={orderSearchTerm}
+                    onChange={(e) => setOrderSearchTerm(e.target.value)}
+                    placeholder="Buscar por código, cliente o teléfono..."
+                    className="w-full pl-9 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                </div>
+              </div>
+
+              {/* Orders Table */}
               <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-5 overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead>
                     <tr className="border-b border-slate-700 text-slate-400 font-bold uppercase text-[10px]">
                       <th className="pb-3">Código</th>
                       <th className="pb-3">Cliente</th>
+                      <th className="pb-3">Entrega / Dirección</th>
                       <th className="pb-3">Artículos</th>
                       <th className="pb-3">Total</th>
-                      <th className="pb-3">Estado Actual</th>
-                      <th className="pb-3">Cambiar Estado</th>
+                      <th className="pb-3">Pago</th>
+                      <th className="pb-3">Estado</th>
                       <th className="pb-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/50">
-                    {orders.map((o) => {
-                      const statusBadge = getOrderStatusLabel(o.status);
+                    {orders
+                      .filter((o) => {
+                        const matchesFilter =
+                          orderFilterStatus === 'all' || o.status === orderFilterStatus;
+                        const matchesSearch =
+                          o.code.toLowerCase().includes(orderSearchTerm.toLowerCase()) ||
+                          o.customer_name.toLowerCase().includes(orderSearchTerm.toLowerCase()) ||
+                          o.customer_phone.toLowerCase().includes(orderSearchTerm.toLowerCase());
+                        return matchesFilter && matchesSearch;
+                      })
+                      .map((o) => {
+                        const statusBadge = getOrderStatusLabel(o.status);
+                        const isPaid = o.payment_status === 'paid';
 
-                      return (
-                        <tr key={o.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="py-3 font-bold text-red-400">{o.code}</td>
-                          <td className="py-3">
-                            <p className="font-semibold text-white">{o.customer_name}</p>
-                            <p className="text-[10px] text-slate-400">{o.customer_phone}</p>
-                          </td>
-                          <td className="py-3 text-slate-300">
-                            {o.items.length} {o.items.length === 1 ? 'producto' : 'productos'}
-                          </td>
-                          <td className="py-3 font-black text-white">{formatXAF(o.total)}</td>
-                          <td className="py-3">
-                            <span
-                              className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${statusBadge.bg} ${statusBadge.text}`}
-                            >
-                              {statusBadge.label}
-                            </span>
-                          </td>
-                          <td className="py-3">
-                            <select
-                              value={o.status}
-                              onChange={(e) =>
-                                handleUpdateOrderStatus(o.id, e.target.value as Order['status'])
-                              }
-                              className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2 py-1 text-xs cursor-pointer"
-                            >
-                              <option value="pending">Pendiente</option>
-                              <option value="confirmed">Confirmado</option>
-                              <option value="preparing">En Preparación</option>
-                              <option value="ready_for_pickup">Listo para Recoger</option>
-                              <option value="shipped">Enviado a Domicilio</option>
-                              <option value="delivered">Entregado</option>
-                              <option value="cancelled">Cancelado</option>
-                            </select>
-                          </td>
-                          <td className="py-3 text-right space-x-1.5">
-                            <button
-                              onClick={() => onOpenInvoiceModal(o)}
-                              className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer"
-                              title="Imprimir Factura"
-                            >
-                              <Printer className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleSendWhatsAppNotification(o)}
-                              className="p-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white cursor-pointer"
-                              title="Notificar por WhatsApp"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr key={o.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="py-3">
+                              <span className="font-bold text-red-400 block">{o.code}</span>
+                              <span className="text-[10px] text-slate-500">{formatDate(o.created_at)}</span>
+                            </td>
+                            <td className="py-3">
+                              <p className="font-semibold text-white">{o.customer_name}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">{o.customer_phone}</p>
+                            </td>
+                            <td className="py-3 text-slate-300">
+                              <span className="font-semibold block capitalize">
+                                {o.delivery_type === 'pickup' ? '🏪 Recogida' : '🚚 Domicilio'}
+                              </span>
+                              {o.delivery_address && (
+                                <span className="text-[10px] text-slate-400 truncate max-w-[150px] block">
+                                  {o.delivery_address}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 text-slate-300 font-medium">
+                              {o.items.length} {o.items.length === 1 ? 'producto' : 'productos'}
+                            </td>
+                            <td className="py-3 font-black text-white font-mono">{formatXAF(o.total)}</td>
+                            <td className="py-3">
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                  isPaid
+                                    ? 'bg-emerald-950/60 text-emerald-400 border-emerald-700/50'
+                                    : 'bg-amber-950/60 text-amber-400 border-amber-700/50'
+                                }`}
+                              >
+                                {isPaid ? 'PAGADO' : 'PENDIENTE'}
+                              </span>
+                            </td>
+                            <td className="py-3">
+                              <span
+                                className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${statusBadge.bg} ${statusBadge.text}`}
+                              >
+                                {statusBadge.label}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => setSelectedOrderForDetail(o)}
+                                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer"
+                                  title="Ver Detalle y Flujo"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-slate-300" />
+                                </button>
+
+                                {!isPaid && o.status !== 'cancelled' && (
+                                  <button
+                                    onClick={() => handleOpenChargeModal(o)}
+                                    className="p-1.5 rounded-lg bg-green-700 hover:bg-green-600 text-white cursor-pointer"
+                                    title="Cobrar Pedido"
+                                  >
+                                    <DollarSign className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+
+                                <button
+                                  onClick={() => onOpenInvoiceModal(o)}
+                                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer"
+                                  title="Imprimir Factura / Ticket"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+
+                                <button
+                                  onClick={() => handleSendWhatsAppNotification(o)}
+                                  className="p-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white cursor-pointer"
+                                  title="Notificar por WhatsApp"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5" />
+                                </button>
+
+                                {o.status !== 'cancelled' && o.status !== 'delivered' && (
+                                  <button
+                                    onClick={() => handleOpenCancelModal(o)}
+                                    className="p-1.5 rounded-lg bg-red-950/70 hover:bg-red-900 border border-red-800/60 text-red-300 cursor-pointer"
+                                    title="Cancelar / Rechazar"
+                                  >
+                                    <XCircle className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
@@ -2569,6 +2765,92 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Confirmar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      <OrderDetailModal
+        order={selectedOrderForDetail}
+        settings={settings}
+        onClose={() => setSelectedOrderForDetail(null)}
+        onAcceptOrder={handleAcceptOrder}
+        onPrepareOrder={handlePrepareOrder}
+        onMarkReady={handleMarkReady}
+        onMarkShipped={handleMarkShipped}
+        onMarkDelivered={handleMarkDelivered}
+        onOpenChargeModal={handleOpenChargeModal}
+        onOpenCancelModal={handleOpenCancelModal}
+        onOpenInvoiceModal={onOpenInvoiceModal}
+        onSendWhatsApp={handleSendWhatsAppNotification}
+      />
+
+      {/* Charge Order Modal */}
+      <ChargeOrderModal
+        order={orderToCharge}
+        isOpen={isChargeModalOpen}
+        onClose={() => {
+          setIsChargeModalOpen(false);
+          setOrderToCharge(null);
+        }}
+        onConfirmCharge={handleConfirmChargeOrder}
+      />
+
+      {/* Cancel Order Modal */}
+      {isCancelModalOpen && orderToCancel && (
+        <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <div className="w-9 h-9 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center">
+                <XCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white font-['Outfit']">
+                  Cancelar Pedido #{orderToCancel.code}
+                </h3>
+                <p className="text-[11px] text-slate-400">Cliente: {orderToCancel.customer_name}</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-red-950/30 border border-red-800/40 rounded-2xl text-xs text-red-300">
+              <p className="font-bold mb-1">Reintegración de Stock Automática</p>
+              <p>
+                Al cancelar este pedido, todos los {orderToCancel.items.length} artículos se reintegrarán automáticamente al stock disponible en el inventario y se registrará el movimiento en el Kardex.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-bold mb-1 text-xs">
+                Motivo de la cancelación / rechazo
+              </label>
+              <textarea
+                rows={2}
+                value={cancelReasonInput}
+                onChange={(e) => setCancelReasonInput(e.target.value)}
+                placeholder="Indica el motivo..."
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCancelModalOpen(false);
+                  setOrderToCancel(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs cursor-pointer"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelOrder}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs cursor-pointer shadow-md shadow-red-950"
+              >
+                Confirmar Cancelación
+              </button>
             </div>
           </div>
         </div>
