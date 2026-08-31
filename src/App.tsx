@@ -457,6 +457,7 @@ export default function App() {
             offers={offers}
             onBackToStore={() => setCurrentView('catalog')}
             onOrderCompleted={handleOrderSuccess}
+            onOpenInvoiceModal={(ord) => setInvoiceOrder(ord)}
           />
         </main>
       )}

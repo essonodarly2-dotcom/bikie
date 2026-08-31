@@ -10,6 +10,7 @@ import {
   Sparkles,
   ShieldCheck,
   AlertCircle,
+  Printer,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { CartItem, Coupon, Order, StoreSettings, UserProfile, Offer } from '../types';
@@ -38,6 +39,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   offers = [],
   onBackToStore,
   onOrderCompleted,
+  onOpenInvoiceModal,
 }) => {
   const [customerName, setCustomerName] = useState(currentUser.name || '');
   const [customerPhone, setCustomerPhone] = useState(currentUser.phone || '+240 ');
@@ -157,6 +159,13 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       type: 'order',
     });
 
+    // Dispatch realtime new order event across browser tabs and components
+    try {
+      window.dispatchEvent(new CustomEvent('bikie:new_order', { detail: newOrder }));
+    } catch {
+      // ignore
+    }
+
     // Fire Confetti
     try {
       confetti({
@@ -230,6 +239,17 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
 
           {/* Action CTAs */}
           <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+            {onOpenInvoiceModal && (
+              <button
+                type="button"
+                onClick={() => onOpenInvoiceModal(completedOrder)}
+                className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform active:scale-95 cursor-pointer border border-slate-700"
+              >
+                <Printer className="w-5 h-5 text-red-500" />
+                <span>Imprimir Factura / Ticket</span>
+              </button>
+            )}
+
             <a
               href={generateWhatsAppLink(completedOrder)}
               target="_blank"
@@ -237,7 +257,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
               className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform active:scale-95 cursor-pointer"
             >
               <MessageCircle className="w-5 h-5 text-white" />
-              <span>Enviar confirmación por WhatsApp a BIKIE</span>
+              <span>Enviar confirmación por WhatsApp</span>
             </a>
           </div>
 

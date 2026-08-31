@@ -1,1 +1,44 @@
 @import "tailwindcss";
+
+/* Estilos de Impresión de Facturas y Tickets BIKIE */
+@media print {
+  /* Ocultar elementos de navegación, modales, fondos y botones no imprimibles */
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ocultar todo por defecto excepto el contenedor de impresión */
+  nav, footer, aside, header, .print\\:hidden, button, [role="dialog"] > div:first-child:not(#bikie-printable-invoice-container) {
+    display: none !important;
+  }
+
+  /* Si el modal de factura está activo, aislar su contenido */
+  #bikie-printable-invoice {
+    display: block !important;
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  .print-page-break {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  @page {
+    margin: 10mm 12mm 10mm 12mm;
+    size: auto;
+  }
+}

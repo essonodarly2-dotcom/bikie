@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -54,6 +54,10 @@ import {
   TrendingDown,
   Globe,
   ExternalLink,
+  Bell,
+  Volume2,
+  VolumeX,
+  Radio,
 } from 'lucide-react';
 import {
   Product,
@@ -75,7 +79,12 @@ import {
 } from '../types';
 import { formatXAF, formatDate, getOrderStatusLabel } from '../utils/formatters';
 import { storageService } from '../lib/storage';
-import { BIKIE_COMPLETE_SQL_SCHEMA, isSupabaseConfigured, downloadDatabaseSchemaSql } from '../lib/supabase';
+import {
+  BIKIE_COMPLETE_SQL_SCHEMA,
+  isSupabaseConfigured,
+  downloadDatabaseSchemaSql,
+  subscribeToSupabaseRealtime,
+} from '../lib/supabase';
 import {
   storeSettingsSchema,
   productSchema,
@@ -141,6 +150,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [cancelReasonInput, setCancelReasonInput] = useState('Cancelado a solicitud del cliente');
   const [orderFilterStatus, setOrderFilterStatus] = useState<string>('all');
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
+
+  // Realtime Order Alert & Sound State
+  const [incomingOrderAlert, setIncomingOrderAlert] = useState<Order | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const soundEnabledRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
+  // Audio Chime Synthesizer
+  const playOrderChime = () => {
+    if (!soundEnabledRef.current) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Gentle, clear 3-tone notification chime (E5, A5, C#6)
+      const frequencies = [659.25, 880.0, 1108.73];
+      frequencies.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.12);
+
+        gain.gain.setValueAtTime(0.0001, now + idx * 0.12);
+        gain.gain.exponentialRampToValueAtTime(0.25, now + idx * 0.12 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.12 + 0.6);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now + idx * 0.12);
+        osc.stop(now + idx * 0.12 + 0.6);
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  // Realtime Subscription Effect (Custom events & Supabase Realtime)
+  useEffect(() => {
+    const handleNewOrder = (orderData: Order) => {
+      setIncomingOrderAlert(orderData);
+      playOrderChime();
+      onRefreshData();
+    };
+
+    const handleCustomOrderEvent = (e: any) => {
+      if (e.detail) {
+        handleNewOrder(e.detail);
+      }
+    };
+
+    window.addEventListener('bikie:new_order', handleCustomOrderEvent);
+
+    // Supabase Realtime Listener for orders table
+    const unsubscribeSupabase = subscribeToSupabaseRealtime(['orders', 'sales', 'cash_registers'], (payload) => {
+      if (payload.table === 'orders' && payload.eventType === 'INSERT' && payload.new) {
+        handleNewOrder(payload.new as Order);
+      } else {
+        onRefreshData();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('bikie:new_order', handleCustomOrderEvent);
+      unsubscribeSupabase();
+    };
+  }, []);
 
   // POS State
   const [posSearch, setPosSearch] = useState('');
@@ -794,7 +875,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       {/* Top Admin Header */}
-      <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-slate-950 border-b border-slate-800 px-4 sm:px-6 py-3.5 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-black font-['Outfit'] text-xl shadow-md">
             B
@@ -814,7 +895,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          {/* Realtime Live Status Indicator */}
+          <div
+            title="Sincronización en tiempo real activa mediante Supabase & Web Realtime"
+            className="hidden sm:flex items-center gap-1.5 bg-emerald-950/80 border border-emerald-700/60 px-3 py-1.5 rounded-xl text-[11px] font-extrabold text-emerald-400 shadow-xs"
+          >
+            <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
+            <span>Realtime Activo</span>
+          </div>
+
+          {/* Sound Notification Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !soundEnabled;
+              setSoundEnabled(next);
+              if (next) playOrderChime();
+            }}
+            title={soundEnabled ? 'Silenciar avisos sonoros de pedidos' : 'Activar timbre sonoro de pedidos'}
+            className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold ${
+              soundEnabled
+                ? 'bg-slate-800 border-amber-500/50 text-amber-400 shadow-xs'
+                : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            <span className="hidden md:inline">{soundEnabled ? 'Sonido ON' : 'Silencio'}</span>
+          </button>
+
           <button
             onClick={onCloseAdmin}
             className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -824,6 +933,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
         </div>
       </header>
+
+      {/* FLOATING REALTIME INCOMING ORDER ALERT BANNER */}
+      {incomingOrderAlert && (
+        <div className="fixed top-20 right-4 sm:right-8 z-50 max-w-lg w-[calc(100%-2rem)] bg-slate-950/95 border-2 border-red-500 rounded-3xl p-5 shadow-2xl shadow-red-950/80 backdrop-blur-md animate-in slide-in-from-top-6 duration-300 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-red-600/20 border border-red-500/50 text-red-500 flex items-center justify-center animate-bounce">
+                <Bell className="w-6 h-6 text-red-500" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-red-400">
+                    ⚡ ¡NUEVO PEDIDO ENTRANTE EN TIEMPO REAL!
+                  </span>
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                  </span>
+                </div>
+                <p className="text-base font-black text-white font-['Outfit']">
+                  Código: <span className="text-red-400">#{incomingOrderAlert.code}</span> · {formatXAF(incomingOrderAlert.total)}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIncomingOrderAlert(null)}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer"
+              title="Cerrar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 text-xs space-y-1.5 text-slate-300">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Cliente:</span>
+              <strong className="text-white">{incomingOrderAlert.customer_name}</strong>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Teléfono:</span>
+              <span className="font-mono text-emerald-400 font-bold">{incomingOrderAlert.customer_phone}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Artículos:</span>
+              <span>{incomingOrderAlert.items?.length || 0} producto(s)</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Tipo de Entrega:</span>
+              <span className="capitalize font-semibold text-slate-200">
+                {incomingOrderAlert.delivery_type === 'pickup' ? '🏪 Recogida en tienda' : '🚚 Envío a domicilio'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => {
+                setSelectedOrderForDetail(incomingOrderAlert);
+                setActiveTab('orders');
+                setIncomingOrderAlert(null);
+              }}
+              className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-slate-700 transition-colors"
+            >
+              <Eye className="w-4 h-4 text-slate-300" />
+              <span>Ver Pedido</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onOpenInvoiceModal(incomingOrderAlert);
+                setIncomingOrderAlert(null);
+              }}
+              className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-red-950 transition-colors"
+            >
+              <Printer className="w-4 h-4 text-white" />
+              <span>Imprimir Factura</span>
+            </button>
+
+            <button
+              onClick={() => {
+                handleAcceptOrder(incomingOrderAlert);
+                setIncomingOrderAlert(null);
+              }}
+              className="py-2.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+              title="Aceptar Pedido Directamente"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Aceptar</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Admin Content Layout */}
       <div className="flex-1 flex flex-col md:flex-row">
@@ -891,8 +1092,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span>Gestión de Pedidos</span>
             </div>
             {pendingOrdersCount > 0 && (
-              <span className="bg-amber-400 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full">
-                {pendingOrdersCount}
+              <span className="bg-red-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-sm shadow-red-900">
+                {pendingOrdersCount} nuevos
               </span>
             )}
           </button>

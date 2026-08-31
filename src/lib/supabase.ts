@@ -60,30 +60,44 @@ export function subscribeToSupabaseRealtime(
 ): () => void {
   if (!supabase) return () => {};
 
-  let channel: RealtimeChannel | null = supabase.channel('bikie-realtime-changes');
+  try {
+    const channelName = `bikie-realtime-${Math.random().toString(36).substring(2, 9)}-${Date.now()}`;
+    let channel: RealtimeChannel | null = supabase.channel(channelName);
 
-  tables.forEach((table) => {
-    channel = channel!.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table },
-      (payload) => {
-        onUpdate({
-          table,
-          eventType: payload.eventType,
-          new: payload.new,
-          old: payload.old,
-        });
+    tables.forEach((table) => {
+      channel = channel!.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table },
+        (payload) => {
+          try {
+            onUpdate({
+              table,
+              eventType: payload.eventType,
+              new: payload.new,
+              old: payload.old,
+            });
+          } catch (err) {
+            console.error('Error handling realtime update:', err);
+          }
+        }
+      );
+    });
+
+    channel.subscribe();
+
+    return () => {
+      try {
+        if (channel && supabase) {
+          supabase.removeChannel(channel);
+        }
+      } catch (err) {
+        console.error('Error cleaning up realtime channel:', err);
       }
-    );
-  });
-
-  channel.subscribe();
-
-  return () => {
-    if (channel && supabase) {
-      supabase.removeChannel(channel);
-    }
-  };
+    };
+  } catch (err) {
+    console.error('Failed to initialize Supabase realtime subscription:', err);
+    return () => {};
+  }
 }
 
 // ==============================================================================
