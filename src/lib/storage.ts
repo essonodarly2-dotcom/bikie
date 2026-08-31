@@ -35,7 +35,7 @@ import {
   INITIAL_EXPENSES,
 } from './mockData';
 import { api, BootstrapData } from './api';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, supabaseDbService } from './supabase';
 
 const STORAGE_KEYS = {
   SETTINGS: 'bikie_settings_v1',
@@ -132,9 +132,33 @@ export function initializeStorage() {
 
 // Storage Accessors with Live Database Sync
 export const storageService = {
-  // Sync all entities with backend DB
+  // Sync all entities with backend DB and Supabase
   syncWithDatabase: async (): Promise<BootstrapData | null> => {
     try {
+      // 1. Try direct Supabase bootstrap first
+      const supabaseData = await supabaseDbService.bootstrapAll();
+      if (supabaseData) {
+        if (supabaseData.settings) setItem(STORAGE_KEYS.SETTINGS, supabaseData.settings);
+        if (supabaseData.categories?.length) setItem(STORAGE_KEYS.CATEGORIES, supabaseData.categories);
+        if (supabaseData.products?.length) setItem(STORAGE_KEYS.PRODUCTS, supabaseData.products);
+        if (supabaseData.orders) setItem(STORAGE_KEYS.ORDERS, supabaseData.orders);
+        if (supabaseData.offers) setItem(STORAGE_KEYS.OFFERS, supabaseData.offers);
+        if (supabaseData.coupons) setItem(STORAGE_KEYS.COUPONS, supabaseData.coupons);
+        if (supabaseData.school_packs) setItem(STORAGE_KEYS.SCHOOL_PACKS, supabaseData.school_packs);
+        if (supabaseData.school_lists) setItem(STORAGE_KEYS.SCHOOL_LISTS, supabaseData.school_lists);
+        if (supabaseData.suppliers) setItem(STORAGE_KEYS.SUPPLIERS, supabaseData.suppliers);
+        if (supabaseData.cash_registers) setItem(STORAGE_KEYS.CASH_REGISTERS, supabaseData.cash_registers);
+        if (supabaseData.cash_movements) setItem(STORAGE_KEYS.CASH_MOVEMENTS, supabaseData.cash_movements);
+        if (supabaseData.inventory_movements) setItem(STORAGE_KEYS.INVENTORY_MOVEMENTS, supabaseData.inventory_movements);
+        if (supabaseData.sales) setItem(STORAGE_KEYS.SALES, supabaseData.sales);
+        if (supabaseData.activity_logs) setItem(STORAGE_KEYS.ACTIVITY_LOGS, supabaseData.activity_logs);
+        if (supabaseData.expenses) setItem(STORAGE_KEYS.EXPENSES, supabaseData.expenses);
+        if (supabaseData.services?.length) setItem(STORAGE_KEYS.SERVICES, supabaseData.services);
+        if (supabaseData.ai_scans) setItem(STORAGE_KEYS.AI_SCANS, supabaseData.ai_scans);
+        return supabaseData as BootstrapData;
+      }
+
+      // 2. Fallback to API bootstrap
       const data = await api.getBootstrapData();
       if (data) {
         if (data.settings) setItem(STORAGE_KEYS.SETTINGS, data.settings);
@@ -166,6 +190,7 @@ export const storageService = {
   getSettings: (): StoreSettings => getItem(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
   saveSettings: (settings: StoreSettings) => {
     setItem(STORAGE_KEYS.SETTINGS, settings);
+    supabaseDbService.updateSettings(settings).catch((e) => console.error(e));
     api.updateSettings(settings).catch((e) => console.error(e));
   },
 
@@ -180,6 +205,7 @@ export const storageService = {
       list.push(category);
     }
     setItem(STORAGE_KEYS.CATEGORIES, list);
+    supabaseDbService.saveCategory(category).catch((e) => console.error(e));
     api.createCategory(category).catch((e) => console.error(e));
   },
   addCategory: (category: Category) => {
@@ -191,15 +217,18 @@ export const storageService = {
     if (idx >= 0) {
       list[idx] = { ...list[idx], ...updates };
       setItem(STORAGE_KEYS.CATEGORIES, list);
+      supabaseDbService.saveCategory(list[idx]).catch((e) => console.error(e));
       api.updateCategory(id, updates).catch((e) => console.error(e));
     }
   },
   saveCategories: (categories: Category[]) => {
     setItem(STORAGE_KEYS.CATEGORIES, categories);
+    categories.forEach((cat) => supabaseDbService.saveCategory(cat).catch((e) => console.error(e)));
   },
   deleteCategory: (id: string) => {
     const list = storageService.getCategories().filter((c) => c.id !== id);
     setItem(STORAGE_KEYS.CATEGORIES, list);
+    supabaseDbService.deleteCategory(id).catch((e) => console.error(e));
     api.deleteCategory(id).catch((e) => console.error(e));
   },
 
@@ -217,6 +246,7 @@ export const storageService = {
       list.unshift(product);
     }
     setItem(STORAGE_KEYS.PRODUCTS, list);
+    supabaseDbService.saveProduct(product).catch((e) => console.error(e));
     api.createProduct(product).catch((e) => console.error(e));
   },
   addProduct: (product: Product) => {
@@ -228,16 +258,19 @@ export const storageService = {
     if (idx >= 0) {
       list[idx] = { ...list[idx], ...updates };
       setItem(STORAGE_KEYS.PRODUCTS, list);
+      supabaseDbService.saveProduct(list[idx]).catch((e) => console.error(e));
       api.updateProduct(id, updates).catch((e) => console.error(e));
     }
   },
   saveProducts: (products: Product[]) => {
     setItem(STORAGE_KEYS.PRODUCTS, products);
+    products.forEach((p) => supabaseDbService.saveProduct(p).catch((e) => console.error(e)));
     api.saveProducts(products).catch((e) => console.error(e));
   },
   deleteProduct: (id: string) => {
     const list = storageService.getProducts().filter((p) => p.id !== id);
     setItem(STORAGE_KEYS.PRODUCTS, list);
+    supabaseDbService.deleteProduct(id).catch((e) => console.error(e));
     api.deleteProduct(id).catch((e) => console.error(e));
   },
   updateProductStock: (id: string, newStock: number, reason: string, userName: string = 'Administradora') => {
@@ -263,6 +296,7 @@ export const storageService = {
       created_at: new Date().toISOString(),
     };
     storageService.addInventoryMovement(movement);
+    supabaseDbService.saveProduct(p).catch((e) => console.error(e));
     api.updateProduct(p.id, { stock: p.stock, status: p.status }).catch((e) => console.error(e));
   },
 
@@ -296,6 +330,7 @@ export const storageService = {
         created_at: new Date().toISOString(),
       };
       storageService.addInventoryMovement(movement);
+      supabaseDbService.saveProduct(p).catch((e) => console.error(e));
       api.updateProduct(p.id, { stock: p.stock, status: p.status }).catch((e) => console.error(e));
       return { success: true };
     }
@@ -336,6 +371,7 @@ export const storageService = {
           created_at: new Date().toISOString(),
         };
         storageService.addInventoryMovement(movement);
+        supabaseDbService.saveProduct(p).catch((e) => console.error(e));
         api.updateProduct(p.id, { stock: p.stock, status: p.status }).catch((e) => console.error(e));
       }
     }
@@ -355,11 +391,13 @@ export const storageService = {
       list.push(service);
     }
     setItem(STORAGE_KEYS.SERVICES, list);
+    supabaseDbService.saveService(service).catch((e) => console.error(e));
     api.createService(service).catch((e) => console.error(e));
   },
   deleteService: (id: string) => {
     const list = storageService.getServices().filter((s) => s.id !== id);
     setItem(STORAGE_KEYS.SERVICES, list);
+    supabaseDbService.deleteService(id).catch((e) => console.error(e));
     api.deleteService(id).catch((e) => console.error(e));
   },
 
@@ -374,11 +412,13 @@ export const storageService = {
       list.unshift(expense);
     }
     setItem(STORAGE_KEYS.EXPENSES, list);
+    supabaseDbService.createExpense(expense).catch((e) => console.error(e));
     api.createExpense(expense).catch((e) => console.error(e));
   },
   deleteExpense: (id: string) => {
     const list = storageService.getExpenses().filter((e) => e.id !== id);
     setItem(STORAGE_KEYS.EXPENSES, list);
+    supabaseDbService.deleteExpense(id).catch((e) => console.error(e));
     api.deleteExpense(id).catch((e) => console.error(e));
   },
 
@@ -393,10 +433,12 @@ export const storageService = {
       list.unshift(order);
     }
     setItem(STORAGE_KEYS.ORDERS, list);
+    supabaseDbService.createOrder(order).catch((e) => console.error(e));
     api.createOrder(order).catch((e) => console.error(e));
   },
   saveOrders: (orders: Order[]) => {
     setItem(STORAGE_KEYS.ORDERS, orders);
+    orders.forEach((o) => supabaseDbService.createOrder(o).catch((e) => console.error(e)));
     api.saveOrders(orders).catch((e) => console.error(e));
   },
   updateOrderStatus: (id: string, status: Order['status'], payment_status?: Order['payment_status']) => {
@@ -406,6 +448,7 @@ export const storageService = {
       order.status = status;
       if (payment_status) order.payment_status = payment_status;
       setItem(STORAGE_KEYS.ORDERS, list);
+      supabaseDbService.updateOrderStatus(id, status, payment_status).catch((e) => console.error(e));
       api.updateOrderStatus(id, status, payment_status).catch((e) => console.error(e));
     }
   },
@@ -416,6 +459,7 @@ export const storageService = {
     const list = storageService.getSales();
     list.unshift(sale);
     setItem(STORAGE_KEYS.SALES, list);
+    supabaseDbService.createSale(sale).catch((e) => console.error(e));
     api.createSale(sale).catch((e) => console.error(e));
   },
 
@@ -425,6 +469,7 @@ export const storageService = {
     const list = storageService.getInventoryMovements();
     list.unshift(movement);
     setItem(STORAGE_KEYS.INVENTORY_MOVEMENTS, list);
+    supabaseDbService.addInventoryMovement(movement).catch((e) => console.error(e));
     api.createInventoryMovement(movement).catch((e) => console.error(e));
   },
 
@@ -443,6 +488,7 @@ export const storageService = {
       list.unshift(reg);
     }
     setItem(STORAGE_KEYS.CASH_REGISTERS, list);
+    supabaseDbService.saveCashRegister(reg).catch((e) => console.error(e));
     api.createCashRegister(reg).catch((e) => console.error(e));
   },
   getCashMovements: (): CashMovement[] => getItem(STORAGE_KEYS.CASH_MOVEMENTS, []),
@@ -450,6 +496,7 @@ export const storageService = {
     const list = storageService.getCashMovements();
     list.unshift(movement);
     setItem(STORAGE_KEYS.CASH_MOVEMENTS, list);
+    supabaseDbService.addCashMovement(movement).catch((e) => console.error(e));
     api.createCashMovement(movement).catch((e) => console.error(e));
   },
 
@@ -464,11 +511,18 @@ export const storageService = {
       list.push(sup);
     }
     setItem(STORAGE_KEYS.SUPPLIERS, list);
+    supabaseDbService.saveSupplier(sup).catch((e) => console.error(e));
     api.createSupplier(sup).catch((e) => console.error(e));
   },
   saveSuppliers: (suppliers: Supplier[]) => {
     setItem(STORAGE_KEYS.SUPPLIERS, suppliers);
+    suppliers.forEach((sup) => supabaseDbService.saveSupplier(sup).catch((e) => console.error(e)));
     api.saveSuppliers(suppliers).catch((e) => console.error(e));
+  },
+  deleteSupplier: (id: string) => {
+    const list = storageService.getSuppliers().filter((s) => s.id !== id);
+    setItem(STORAGE_KEYS.SUPPLIERS, list);
+    supabaseDbService.deleteSupplier(id).catch((e) => console.error(e));
   },
   getPurchases: (): Purchase[] => getItem(STORAGE_KEYS.PURCHASES, []),
   savePurchase: (purchase: Purchase) => {
@@ -490,10 +544,12 @@ export const storageService = {
     if (idx >= 0) list[idx] = offer;
     else list.push(offer);
     setItem(STORAGE_KEYS.OFFERS, list);
+    supabaseDbService.saveOffer(offer).catch((e) => console.error(e));
   },
   deleteOffer: (id: string) => {
     const list = storageService.getOffers().filter((o) => o.id !== id);
     setItem(STORAGE_KEYS.OFFERS, list);
+    supabaseDbService.deleteOffer(id).catch((e) => console.error(e));
   },
   getCoupons: (): Coupon[] => getItem(STORAGE_KEYS.COUPONS, INITIAL_COUPONS),
   saveCoupon: (coupon: Coupon) => {
@@ -502,10 +558,12 @@ export const storageService = {
     if (idx >= 0) list[idx] = coupon;
     else list.push(coupon);
     setItem(STORAGE_KEYS.COUPONS, list);
+    supabaseDbService.saveCoupon(coupon).catch((e) => console.error(e));
   },
   deleteCoupon: (id: string) => {
     const list = storageService.getCoupons().filter((c) => c.id !== id);
     setItem(STORAGE_KEYS.COUPONS, list);
+    supabaseDbService.deleteCoupon(id).catch((e) => console.error(e));
   },
 
   // School Packs & Lists
@@ -516,10 +574,12 @@ export const storageService = {
     if (idx >= 0) list[idx] = pack;
     else list.push(pack);
     setItem(STORAGE_KEYS.SCHOOL_PACKS, list);
+    supabaseDbService.saveSchoolPack(pack).catch((e) => console.error(e));
   },
   deleteSchoolPack: (id: string) => {
     const list = storageService.getSchoolPacks().filter((p) => p.id !== id);
     setItem(STORAGE_KEYS.SCHOOL_PACKS, list);
+    supabaseDbService.deleteSchoolPack(id).catch((e) => console.error(e));
   },
   getSchoolLists: (): SchoolList[] => getItem(STORAGE_KEYS.SCHOOL_LISTS, INITIAL_SCHOOL_LISTS),
   saveSchoolList: (schoolList: SchoolList) => {
@@ -528,10 +588,12 @@ export const storageService = {
     if (idx >= 0) list[idx] = schoolList;
     else list.push(schoolList);
     setItem(STORAGE_KEYS.SCHOOL_LISTS, list);
+    supabaseDbService.saveSchoolList(schoolList).catch((e) => console.error(e));
   },
   deleteSchoolList: (id: string) => {
     const list = storageService.getSchoolLists().filter((l) => l.id !== id);
     setItem(STORAGE_KEYS.SCHOOL_LISTS, list);
+    supabaseDbService.deleteSchoolList(id).catch((e) => console.error(e));
   },
 
   // AI Scans Records
@@ -540,6 +602,7 @@ export const storageService = {
     const list = storageService.getAiScans();
     list.unshift(scan);
     setItem(STORAGE_KEYS.AI_SCANS, list);
+    supabaseDbService.addAiScan(scan).catch((e) => console.error(e));
     api.createAiScan(scan).catch((e) => console.error(e));
   },
   addAiScan: (scan: Partial<AiScanRecord>): AiScanRecord => {
@@ -599,6 +662,7 @@ export const storageService = {
     const list = storageService.getActivityLogs();
     list.unshift(log);
     setItem(STORAGE_KEYS.ACTIVITY_LOGS, list.slice(0, 200));
+    supabaseDbService.logActivity(log).catch((e) => console.error(e));
     api.logActivity(log).catch((e) => console.error(e));
   },
   addActivityLog: (actionOrObj: string | any, entity?: string, entity_id?: string, details?: string, userName = 'María Lidia (Administradora)', userRole = 'admin') => {
@@ -629,6 +693,7 @@ export const storageService = {
     if (idx >= 0) {
       list[idx] = { ...list[idx], ...updates };
       setItem(STORAGE_KEYS.EXPENSES, list);
+      supabaseDbService.createExpense(list[idx]).catch((e) => console.error(e));
       api.updateExpense(id, updates).catch((e) => console.error(e));
     }
   },
@@ -658,6 +723,7 @@ export const storageService = {
       if (idx >= 0) {
         list[idx] = { ...list[idx], ...(updates || {}) };
         setItem(STORAGE_KEYS.OFFERS, list);
+        supabaseDbService.saveOffer(list[idx]).catch((e) => console.error(e));
       }
     } else {
       storageService.saveOffer(idOrOffer);
@@ -672,6 +738,7 @@ export const storageService = {
       if (idx >= 0) {
         list[idx] = { ...list[idx], ...(updates || {}) };
         setItem(STORAGE_KEYS.ORDERS, list);
+        supabaseDbService.createOrder(list[idx]).catch((e) => console.error(e));
       }
     } else {
       storageService.saveOrder(idOrOrder);
@@ -680,6 +747,7 @@ export const storageService = {
   deleteOrder: (id: string) => {
     const list = storageService.getOrders().filter((o) => o.id !== id);
     setItem(STORAGE_KEYS.ORDERS, list);
+    supabaseDbService.deleteOrder(id).catch((e) => console.error(e));
     api.deleteOrder(id).catch((e) => console.error(e));
   },
   addSale: (sale: Sale) => {
@@ -692,6 +760,7 @@ export const storageService = {
       if (idx >= 0) {
         list[idx] = { ...list[idx], ...(updates || {}) };
         setItem(STORAGE_KEYS.SALES, list);
+        supabaseDbService.createSale(list[idx]).catch((e) => console.error(e));
         api.createSale(list[idx]).catch((e) => console.error(e));
       }
     } else {
@@ -700,12 +769,14 @@ export const storageService = {
       if (idx >= 0) list[idx] = idOrSale;
       else list.unshift(idOrSale);
       setItem(STORAGE_KEYS.SALES, list);
+      supabaseDbService.createSale(idOrSale).catch((e) => console.error(e));
       api.createSale(idOrSale).catch((e) => console.error(e));
     }
   },
   deleteSale: (id: string) => {
     const list = storageService.getSales().filter((s) => s.id !== id);
     setItem(STORAGE_KEYS.SALES, list);
+    supabaseDbService.deleteSale(id).catch((e) => console.error(e));
   },
   updateCashRegister: (idOrReg: string | CashRegister, updates?: Partial<CashRegister>) => {
     if (typeof idOrReg === 'string') {
@@ -714,6 +785,7 @@ export const storageService = {
       if (idx >= 0) {
         list[idx] = { ...list[idx], ...(updates || {}) };
         setItem(STORAGE_KEYS.CASH_REGISTERS, list);
+        supabaseDbService.saveCashRegister(list[idx]).catch((e) => console.error(e));
         api.updateCashRegister(idOrReg, updates || {}).catch((e) => console.error(e));
       }
     } else {
@@ -722,6 +794,7 @@ export const storageService = {
   },
   saveCashRegisters: (registers: CashRegister[]) => {
     setItem(STORAGE_KEYS.CASH_REGISTERS, registers);
+    registers.forEach((r) => supabaseDbService.saveCashRegister(r).catch((e) => console.error(e)));
   },
 
   // Services helper methods
@@ -746,6 +819,7 @@ export const storageService = {
       if (idx >= 0) {
         list[idx] = { ...list[idx], ...(updates || {}) };
         setItem(STORAGE_KEYS.SERVICES, list);
+        supabaseDbService.saveService(list[idx]).catch((e) => console.error(e));
         api.updateService(idOrService, updates || {}).catch((e) => console.error(e));
       }
     } else {
@@ -754,6 +828,7 @@ export const storageService = {
   },
   resetDefaultServices: () => {
     setItem(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    INITIAL_SERVICES.forEach((s) => supabaseDbService.saveService(s).catch((e) => console.error(e)));
     api.saveServices(INITIAL_SERVICES).catch((e) => console.error(e));
   },
 

@@ -77,7 +77,7 @@ function sanitizeInput(str: unknown): string {
   return str.replace(/[<>]/g, '').trim();
 }
 
-// Lazy initialize Supabase server client for DB-level rate limiting & logging
+// Lazy initialize Supabase server client for DB-level rate limiting & logging & real persistence
 let serverSupabase: ReturnType<typeof createClient> | null = null;
 function getServerSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -89,6 +89,21 @@ function getServerSupabase() {
     serverSupabase = createClient(url, key);
   }
   return serverSupabase;
+}
+
+// Background asynchronous synchronization with Supabase
+async function syncToSupabase(tableName: string, data: any, operation: 'upsert' | 'delete' = 'upsert', idField = 'id') {
+  try {
+    const sb = getServerSupabase();
+    if (!sb) return;
+    if (operation === 'upsert') {
+      await sb.from(tableName).upsert(data);
+    } else if (operation === 'delete' && data) {
+      await sb.from(tableName).delete().eq(idField, data);
+    }
+  } catch (err) {
+    console.warn(`[SUPABASE SYNC] Failed to sync ${operation} on table ${tableName}:`, err);
+  }
 }
 
 // Lazy initialize Gemini AI client
@@ -355,6 +370,7 @@ app.get('/api/products', (req, res) => {
 app.post('/api/products', (req, res) => {
   try {
     const product = db.createProduct(req.body);
+    syncToSupabase('products', product, 'upsert');
     res.json({ success: true, product });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -365,6 +381,7 @@ app.put('/api/products/:id', (req, res) => {
   try {
     const product = db.updateProduct(req.params.id, req.body);
     if (!product) return res.status(404).json({ success: false, error: 'Producto no encontrado' });
+    syncToSupabase('products', product, 'upsert');
     res.json({ success: true, product });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -373,6 +390,7 @@ app.put('/api/products/:id', (req, res) => {
 
 app.delete('/api/products/:id', (req, res) => {
   const deleted = db.deleteProduct(req.params.id);
+  if (deleted) syncToSupabase('products', req.params.id, 'delete');
   res.json({ success: deleted });
 });
 
@@ -386,6 +404,7 @@ app.get('/api/categories', (req, res) => {
 app.post('/api/categories', (req, res) => {
   try {
     const category = db.createCategory(req.body);
+    syncToSupabase('categories', category, 'upsert');
     res.json({ success: true, category });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -396,6 +415,7 @@ app.put('/api/categories/:id', (req, res) => {
   try {
     const category = db.updateCategory(req.params.id, req.body);
     if (!category) return res.status(404).json({ success: false, error: 'Categoría no encontrada' });
+    syncToSupabase('categories', category, 'upsert');
     res.json({ success: true, category });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -404,6 +424,7 @@ app.put('/api/categories/:id', (req, res) => {
 
 app.delete('/api/categories/:id', (req, res) => {
   const deleted = db.deleteCategory(req.params.id);
+  if (deleted) syncToSupabase('categories', req.params.id, 'delete');
   res.json({ success: deleted });
 });
 
@@ -417,6 +438,7 @@ app.get('/api/orders', (req, res) => {
 app.post('/api/orders', (req, res) => {
   try {
     const order = db.createOrder(req.body);
+    syncToSupabase('orders', order, 'upsert');
     res.json({ success: true, order });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -428,6 +450,7 @@ app.put('/api/orders/:id/status', (req, res) => {
     const { status, payment_status } = req.body;
     const order = db.updateOrderStatus(req.params.id, status, payment_status);
     if (!order) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
+    syncToSupabase('orders', order, 'upsert');
     res.json({ success: true, order });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -438,6 +461,7 @@ app.put('/api/orders/:id', (req, res) => {
   try {
     const order = db.updateOrder(req.params.id, req.body);
     if (!order) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
+    syncToSupabase('orders', order, 'upsert');
     res.json({ success: true, order });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -447,6 +471,7 @@ app.put('/api/orders/:id', (req, res) => {
 app.delete('/api/orders/:id', (req, res) => {
   try {
     const deleted = db.deleteOrder(req.params.id);
+    if (deleted) syncToSupabase('orders', req.params.id, 'delete');
     res.json({ success: deleted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -463,6 +488,7 @@ app.get('/api/sales', (req, res) => {
 app.post('/api/sales', (req, res) => {
   try {
     const sale = db.createSale(req.body);
+    syncToSupabase('sales', sale, 'upsert');
     res.json({ success: true, sale });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -473,6 +499,7 @@ app.put('/api/sales/:id', (req, res) => {
   try {
     const sale = db.updateSale(req.params.id, req.body);
     if (!sale) return res.status(404).json({ success: false, error: 'Venta no encontrada' });
+    syncToSupabase('sales', sale, 'upsert');
     res.json({ success: true, sale });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -482,6 +509,7 @@ app.put('/api/sales/:id', (req, res) => {
 app.delete('/api/sales/:id', (req, res) => {
   try {
     const deleted = db.deleteSale(req.params.id);
+    if (deleted) syncToSupabase('sales', req.params.id, 'delete');
     res.json({ success: deleted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -498,6 +526,7 @@ app.get('/api/settings', (req, res) => {
 app.put('/api/settings', (req, res) => {
   try {
     const settings = db.updateSettings(req.body);
+    syncToSupabase('store_settings', { id: 1, ...settings }, 'upsert');
     res.json({ success: true, settings });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -514,6 +543,7 @@ app.get('/api/cash-registers', (req, res) => {
 app.post('/api/cash-registers', (req, res) => {
   try {
     const reg = db.createCashRegister(req.body);
+    syncToSupabase('cash_registers', reg, 'upsert');
     res.json({ success: true, register: reg });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -523,6 +553,7 @@ app.post('/api/cash-registers', (req, res) => {
 app.put('/api/cash-registers/:id', (req, res) => {
   try {
     const reg = db.updateCashRegister(req.params.id, req.body);
+    syncToSupabase('cash_registers', reg, 'upsert');
     res.json({ success: true, register: reg });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -536,6 +567,7 @@ app.get('/api/cash-movements', (req, res) => {
 app.post('/api/cash-movements', (req, res) => {
   try {
     const mov = db.createCashMovement(req.body);
+    syncToSupabase('cash_movements', mov, 'upsert');
     res.json({ success: true, movement: mov });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -552,6 +584,7 @@ app.get('/api/inventory-movements', (req, res) => {
 app.post('/api/inventory-movements', (req, res) => {
   try {
     const mov = db.addInventoryMovement(req.body);
+    syncToSupabase('inventory_movements', mov, 'upsert');
     res.json({ success: true, movement: mov });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -567,6 +600,9 @@ app.get('/api/school-packs', (req, res) => {
 
 app.put('/api/school-packs', (req, res) => {
   db.saveSchoolPacks(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((p) => syncToSupabase('school_packs', p, 'upsert'));
+  }
   res.json({ success: true });
 });
 
@@ -576,6 +612,9 @@ app.get('/api/school-lists', (req, res) => {
 
 app.put('/api/school-lists', (req, res) => {
   db.saveSchoolLists(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((l) => syncToSupabase('school_lists', l, 'upsert'));
+  }
   res.json({ success: true });
 });
 
@@ -589,6 +628,7 @@ app.get('/api/offers', (req, res) => {
 app.post('/api/offers', (req, res) => {
   try {
     const offer = db.createOffer(req.body);
+    syncToSupabase('offers', offer, 'upsert');
     res.json({ success: true, offer });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -599,6 +639,7 @@ app.put('/api/offers/:id', (req, res) => {
   try {
     const offer = db.updateOffer(req.params.id, req.body);
     if (!offer) return res.status(404).json({ success: false, error: 'Oferta no encontrada' });
+    syncToSupabase('offers', offer, 'upsert');
     res.json({ success: true, offer });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -608,6 +649,7 @@ app.put('/api/offers/:id', (req, res) => {
 app.delete('/api/offers/:id', (req, res) => {
   try {
     const deleted = db.deleteOffer(req.params.id);
+    if (deleted) syncToSupabase('offers', req.params.id, 'delete');
     res.json({ success: deleted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -616,6 +658,9 @@ app.delete('/api/offers/:id', (req, res) => {
 
 app.put('/api/offers', (req, res) => {
   db.saveOffers(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((o) => syncToSupabase('offers', o, 'upsert'));
+  }
   res.json({ success: true });
 });
 
@@ -625,6 +670,9 @@ app.get('/api/coupons', (req, res) => {
 
 app.put('/api/coupons', (req, res) => {
   db.saveCoupons(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((c) => syncToSupabase('coupons', c, 'upsert'));
+  }
   res.json({ success: true });
 });
 
@@ -637,6 +685,9 @@ app.get('/api/suppliers', (req, res) => {
 
 app.put('/api/suppliers', (req, res) => {
   db.saveSuppliers(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((s) => syncToSupabase('suppliers', s, 'upsert'));
+  }
   res.json({ success: true });
 });
 
@@ -650,6 +701,7 @@ app.get('/api/expenses', (req, res) => {
 app.post('/api/expenses', (req, res) => {
   try {
     const expense = db.createExpense(req.body);
+    syncToSupabase('expenses', expense, 'upsert');
     res.json({ success: true, expense });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -660,6 +712,7 @@ app.put('/api/expenses/:id', (req, res) => {
   try {
     const expense = db.updateExpense(req.params.id, req.body);
     if (!expense) return res.status(404).json({ success: false, error: 'Gasto no encontrado' });
+    syncToSupabase('expenses', expense, 'upsert');
     res.json({ success: true, expense });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -669,6 +722,7 @@ app.put('/api/expenses/:id', (req, res) => {
 app.delete('/api/expenses/:id', (req, res) => {
   try {
     const deleted = db.deleteExpense(req.params.id);
+    if (deleted) syncToSupabase('expenses', req.params.id, 'delete');
     res.json({ success: deleted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -677,6 +731,9 @@ app.delete('/api/expenses/:id', (req, res) => {
 
 app.put('/api/expenses', (req, res) => {
   db.saveExpenses(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((e) => syncToSupabase('expenses', e, 'upsert'));
+  }
   res.json({ success: true });
 });
 
@@ -690,6 +747,7 @@ app.get('/api/services', (req, res) => {
 app.post('/api/services', (req, res) => {
   try {
     const service = db.createService(req.body);
+    syncToSupabase('services', service, 'upsert');
     res.json({ success: true, service });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -700,6 +758,7 @@ app.put('/api/services/:id', (req, res) => {
   try {
     const service = db.updateService(req.params.id, req.body);
     if (!service) return res.status(404).json({ success: false, error: 'Servicio no encontrado' });
+    syncToSupabase('services', service, 'upsert');
     res.json({ success: true, service });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -709,6 +768,7 @@ app.put('/api/services/:id', (req, res) => {
 app.delete('/api/services/:id', (req, res) => {
   try {
     const deleted = db.deleteService(req.params.id);
+    if (deleted) syncToSupabase('services', req.params.id, 'delete');
     res.json({ success: deleted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -717,6 +777,9 @@ app.delete('/api/services/:id', (req, res) => {
 
 app.put('/api/services', (req, res) => {
   db.saveServices(req.body);
+  if (Array.isArray(req.body)) {
+    req.body.forEach((s) => syncToSupabase('services', s, 'upsert'));
+  }
   res.json({ success: true });
 });
 

@@ -35,6 +35,7 @@ import {
 } from './types';
 import { storageService } from './lib/storage';
 import { api } from './lib/api';
+import { subscribeToSupabaseRealtime } from './lib/supabase';
 import { formatXAF } from './utils/formatters';
 
 // Components
@@ -103,14 +104,23 @@ export default function App() {
     // Initial load
     refreshStateFromDb();
 
-    // Subscribe to Server-Sent Events (SSE) for instant live DB updates across devices
-    const unsubscribe = api.subscribeToRealtime((event) => {
-      console.log('Real-time database event received:', event.type);
+    // Subscribe to Server-Sent Events (SSE) and Supabase Postgres Realtime for instant live DB updates across devices
+    const unsubscribeSse = api.subscribeToRealtime((event) => {
+      console.log('Real-time database SSE event received:', event.type);
       refreshStateFromDb();
     });
 
+    const unsubscribeSupabase = subscribeToSupabaseRealtime(
+      ['orders', 'products', 'categories', 'offers', 'coupons', 'school_packs', 'school_lists', 'profiles', 'store_settings', 'sales', 'inventory_movements'],
+      (payload) => {
+        console.log('⚡ Direct Supabase Realtime event:', payload.table, payload.eventType);
+        refreshStateFromDb();
+      }
+    );
+
     return () => {
-      unsubscribe();
+      unsubscribeSse();
+      unsubscribeSupabase();
     };
   }, []);
 
@@ -150,6 +160,17 @@ export default function App() {
   // Cart State: { product: Product, quantity: number }[]
   const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
   const [favorites, setFavorites] = useState<string[]>(['prod-01', 'prod-04']);
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [usePoints, setUsePoints] = useState(false);
+
+  const handleApplyCoupon = (code: string) => {
+    const found = coupons.find((c) => c.code.toLowerCase() === code.trim().toLowerCase() && c.is_active);
+    if (!found) {
+      return { success: false, message: 'Cupón no válido o vencido' };
+    }
+    setAppliedCoupon(found);
+    return { success: true, message: `Cupón ${found.code} aplicado con éxito` };
+  };
 
   // Modals and Drawers
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -428,12 +449,14 @@ export default function App() {
       {currentView === 'checkout' && (
         <main className="flex-1">
           <CheckoutView
-            cart={cart}
-            coupons={coupons}
+            items={cart}
+            appliedCoupon={appliedCoupon}
+            usePoints={usePoints}
             currentUser={currentUser}
             settings={settings}
-            onBackToCart={() => setCurrentView('catalog')}
-            onOrderPlaced={handleOrderSuccess}
+            offers={offers}
+            onBackToStore={() => setCurrentView('catalog')}
+            onOrderCompleted={handleOrderSuccess}
           />
         </main>
       )}
@@ -868,6 +891,7 @@ export default function App() {
         onClose={() => setIsCartOpen(false)}
         cart={cart}
         items={cart}
+        offers={offers}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveFromCart}
         onClearCart={() => setCart([])}
@@ -875,9 +899,14 @@ export default function App() {
           setIsCartOpen(false);
           setCurrentView('checkout');
         }}
+        coupons={coupons}
+        appliedCoupon={appliedCoupon}
+        onApplyCoupon={handleApplyCoupon}
+        onRemoveCoupon={() => setAppliedCoupon(null)}
+        usePoints={usePoints}
+        onToggleUsePoints={setUsePoints}
         currentUser={currentUser}
         settings={settings}
-        onOpenInvoiceModal={(order) => setInvoiceOrder(order)}
       />
 
       <AiListScannerModal
@@ -911,7 +940,6 @@ export default function App() {
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         currentUser={currentUser}
-        availableUsers={users}
         onLoginSuccess={handleLoginSuccess}
         onLogoutToGuest={handleLogoutToGuest}
       />

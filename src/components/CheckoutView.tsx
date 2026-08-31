@@ -7,15 +7,15 @@ import {
   CreditCard,
   Phone,
   MessageCircle,
-  FileText,
   Sparkles,
   ShieldCheck,
   AlertCircle,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { CartItem, Coupon, Order, StoreSettings, UserProfile } from '../types';
+import { CartItem, Coupon, Order, StoreSettings, UserProfile, Offer } from '../types';
 import { formatXAF, formatDate } from '../utils/formatters';
 import { storageService } from '../lib/storage';
+import { calculateCartPricing } from '../lib/promotions';
 
 interface CheckoutViewProps {
   items: CartItem[];
@@ -23,9 +23,10 @@ interface CheckoutViewProps {
   usePoints: boolean;
   currentUser: UserProfile;
   settings: StoreSettings;
+  offers?: Offer[];
   onBackToStore: () => void;
   onOrderCompleted: (order: Order) => void;
-  onOpenInvoiceModal: (order: Order) => void;
+  onOpenInvoiceModal?: (order: Order) => void;
 }
 
 export const CheckoutView: React.FC<CheckoutViewProps> = ({
@@ -34,9 +35,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   usePoints,
   currentUser,
   settings,
+  offers = [],
   onBackToStore,
   onOrderCompleted,
-  onOpenInvoiceModal,
 }) => {
   const [customerName, setCustomerName] = useState(currentUser.name || '');
   const [customerPhone, setCustomerPhone] = useState(currentUser.phone || '+240 ');
@@ -50,24 +51,19 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const subtotal = items.reduce((sum, item) => sum + item.product.sale_price * item.quantity, 0);
+  const pricing = calculateCartPricing(
+    items,
+    offers,
+    appliedCoupon,
+    usePoints,
+    currentUser.points || 0,
+    deliveryType
+  );
 
-  // Coupon discount
-  let couponDiscount = 0;
-  if (appliedCoupon) {
-    if (appliedCoupon.discount_type === 'percentage') {
-      couponDiscount = Math.round((subtotal * appliedCoupon.discount_value) / 100);
-    } else {
-      couponDiscount = appliedCoupon.discount_value;
-    }
-  }
-
-  // Points discount
-  const maxPointsToUse = Math.min(currentUser.points || 0, Math.floor(subtotal / 10));
-  const pointsDiscount = usePoints ? maxPointsToUse * 5 : 0;
-
-  const deliveryCost = deliveryType === 'delivery' ? 1500 : 0;
-  const total = Math.max(0, subtotal - couponDiscount - pointsDiscount + deliveryCost);
+  const subtotal = pricing.subtotal;
+  const totalDiscount = pricing.totalDiscount;
+  const deliveryCost = pricing.deliveryCost;
+  const total = pricing.finalTotal;
 
   const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,7 +122,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       payment_method: paymentMethod,
       payment_status: paymentMethod === 'store' ? 'unpaid' : 'paid',
       subtotal,
-      discount: couponDiscount + pointsDiscount,
+      discount: totalDiscount,
       coupon_code: appliedCoupon ? appliedCoupon.code : undefined,
       total,
       items: items.map((i) => ({
@@ -185,7 +181,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       .map((i) => `• ${i.quantity}x ${i.product_name} (${formatXAF(i.total_price)})`)
       .join('\n');
 
-    const text = `👋 *¡Hola BIKIE Papelería!*\n\nAcabo de realizar el pedido *${order.code}* a través de la web:\n\n*Cliente:* ${order.customer_name}\n*Teléfono:* ${order.customer_phone}\n*Entrega:* ${order.delivery_type === 'pickup' ? 'Recogida en tienda (Paraíso, Malabo)' : 'Envío a domicilio (' + order.delivery_address + ')'}\n*Método de Pago:* ${order.payment_method}\n\n*Artículos:*\n${itemsList}\n\n*TOTAL A PAGAR:* ${formatXAF(order.total)}\n\nPor favor confírmenme cuando esté listo y envíenme la factura oficial. ¡Muchas gracias!`;
+    const text = `👋 *¡Hola BIKIE Papelería!*\n\nAcabo de realizar el pedido *${order.code}* a través de la web:\n\n*Cliente:* ${order.customer_name}\n*Teléfono:* ${order.customer_phone}\n*Entrega:* ${order.delivery_type === 'pickup' ? 'Recogida en tienda (Paraíso, Malabo)' : 'Envío a domicilio (' + (order.delivery_address || 'Malabo') + ')'}\n*Método de Pago:* ${order.payment_method}\n\n*Artículos:*\n${itemsList}\n\n*TOTAL A PAGAR:* ${formatXAF(order.total)}\n\nPor favor confírmenme cuando esté listo. ¡Muchas gracias!`;
 
     return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
   };
@@ -208,7 +204,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           </h2>
 
           <p className="text-sm text-slate-600 max-w-md mx-auto">
-            Gracias por tu compra en <strong>BIKIE</strong>. Hemos registrado tu pedido y tus materiales están reservados.
+            Gracias por tu compra en <strong>BIKIE</strong>. Hemos registrado tu pedido en nuestra base de datos.
           </p>
 
           <div className="p-4 rounded-2xl bg-red-50/60 border border-red-100 max-w-md mx-auto text-left space-y-2 text-xs">
@@ -241,16 +237,8 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
               className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform active:scale-95 cursor-pointer"
             >
               <MessageCircle className="w-5 h-5 text-white" />
-              <span>Enviar detalles por WhatsApp a BIKIE</span>
+              <span>Enviar confirmación por WhatsApp a BIKIE</span>
             </a>
-
-            <button
-              onClick={() => onOpenInvoiceModal(completedOrder)}
-              className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <FileText className="w-4 h-4 text-red-600" />
-              <span>Ver / Imprimir Recibo</span>
-            </button>
           </div>
 
           <div className="pt-2">
@@ -510,16 +498,22 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                 <span>Subtotal</span>
                 <span>{formatXAF(subtotal)}</span>
               </div>
-              {couponDiscount > 0 && (
-                <div className="flex justify-between text-emerald-600 font-semibold">
-                  <span>Descuento ({appliedCoupon?.code})</span>
-                  <span>-{formatXAF(couponDiscount)}</span>
+              {pricing.offersDiscount > 0 && (
+                <div className="flex justify-between text-amber-600 font-semibold">
+                  <span>Ofertas y Promociones</span>
+                  <span>-{formatXAF(pricing.offersDiscount)}</span>
                 </div>
               )}
-              {pointsDiscount > 0 && (
-                <div className="flex justify-between text-amber-600 font-semibold">
+              {pricing.couponDiscount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Descuento cupón ({appliedCoupon?.code})</span>
+                  <span>-{formatXAF(pricing.couponDiscount)}</span>
+                </div>
+              )}
+              {pricing.pointsDiscount > 0 && (
+                <div className="flex justify-between text-indigo-600 font-semibold">
                   <span>Descuento puntos</span>
-                  <span>-{formatXAF(pointsDiscount)}</span>
+                  <span>-{formatXAF(pricing.pointsDiscount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-slate-500">

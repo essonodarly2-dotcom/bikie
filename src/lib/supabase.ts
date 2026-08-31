@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import {
   Product,
   Category,
@@ -18,6 +18,7 @@ import {
   Expense,
   ServiceItem,
   ActivityLog,
+  AiScanRecord,
 } from '../types';
 
 const getEnv = (key: string): string => {
@@ -30,6 +31,7 @@ const getEnv = (key: string): string => {
   return '';
 };
 
+// Frontend environment variables (NEVER expose service_role key to browser)
 const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
 const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 
@@ -50,6 +52,39 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
       },
     })
   : null;
+
+// Realtime subscription helper
+export function subscribeToSupabaseRealtime(
+  tables: string[],
+  onUpdate: (payload: { table: string; eventType: string; new?: any; old?: any }) => void
+): () => void {
+  if (!supabase) return () => {};
+
+  let channel: RealtimeChannel | null = supabase.channel('bikie-realtime-changes');
+
+  tables.forEach((table) => {
+    channel = channel!.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      (payload) => {
+        onUpdate({
+          table,
+          eventType: payload.eventType,
+          new: payload.new,
+          old: payload.old,
+        });
+      }
+    );
+  });
+
+  channel.subscribe();
+
+  return () => {
+    if (channel && supabase) {
+      supabase.removeChannel(channel);
+    }
+  };
+}
 
 // ==============================================================================
 // COMPLETE POSTGRESQL / SUPABASE PRODUCTION SCHEMA FOR BIKIE PAPELERÍA
@@ -693,8 +728,94 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 `;
 
-// Direct Supabase Service Helper
+// Direct Supabase Service Helper with support for ALL modules
 export const supabaseDbService = {
+  // Bootstrap: Fetch all application state from Supabase tables
+  async bootstrapAll(): Promise<{
+    settings?: StoreSettings;
+    categories?: Category[];
+    products?: Product[];
+    orders?: Order[];
+    sales?: Sale[];
+    services?: ServiceItem[];
+    expenses?: Expense[];
+    offers?: Offer[];
+    coupons?: Coupon[];
+    school_packs?: SchoolPack[];
+    school_lists?: SchoolList[];
+    suppliers?: Supplier[];
+    cash_registers?: CashRegister[];
+    cash_movements?: CashMovement[];
+    inventory_movements?: InventoryMovement[];
+    ai_scans?: AiScanRecord[];
+    activity_logs?: ActivityLog[];
+  } | null> {
+    if (!supabase) return null;
+    try {
+      const [
+        settingsRes,
+        categoriesRes,
+        productsRes,
+        ordersRes,
+        salesRes,
+        servicesRes,
+        expensesRes,
+        offersRes,
+        couponsRes,
+        packsRes,
+        listsRes,
+        suppliersRes,
+        registersRes,
+        movementsRes,
+        invRes,
+        scansRes,
+        logsRes,
+      ] = await Promise.allSettled([
+        supabase.from('store_settings').select('*').eq('id', 1).maybeSingle(),
+        supabase.from('categories').select('*').order('display_order', { ascending: true }),
+        supabase.from('products').select('*').order('created_at', { ascending: false }),
+        supabase.from('orders').select('*').order('created_at', { ascending: false }),
+        supabase.from('sales').select('*').order('created_at', { ascending: false }),
+        supabase.from('services').select('*').order('created_at', { ascending: true }),
+        supabase.from('expenses').select('*').order('created_at', { ascending: false }),
+        supabase.from('offers').select('*').order('created_at', { ascending: false }),
+        supabase.from('coupons').select('*').order('created_at', { ascending: false }),
+        supabase.from('school_packs').select('*').order('created_at', { ascending: false }),
+        supabase.from('school_lists').select('*').order('created_at', { ascending: false }),
+        supabase.from('suppliers').select('*').order('created_at', { ascending: false }),
+        supabase.from('cash_registers').select('*').order('opened_at', { ascending: false }),
+        supabase.from('cash_movements').select('*').order('created_at', { ascending: false }),
+        supabase.from('inventory_movements').select('*').order('created_at', { ascending: false }),
+        supabase.from('ai_scans').select('*').order('created_at', { ascending: false }),
+        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }),
+      ]);
+
+      const result: any = {};
+      if (settingsRes.status === 'fulfilled' && settingsRes.value.data) result.settings = settingsRes.value.data;
+      if (categoriesRes.status === 'fulfilled' && categoriesRes.value.data?.length) result.categories = categoriesRes.value.data;
+      if (productsRes.status === 'fulfilled' && productsRes.value.data?.length) result.products = productsRes.value.data;
+      if (ordersRes.status === 'fulfilled' && ordersRes.value.data) result.orders = ordersRes.value.data;
+      if (salesRes.status === 'fulfilled' && salesRes.value.data) result.sales = salesRes.value.data;
+      if (servicesRes.status === 'fulfilled' && servicesRes.value.data?.length) result.services = servicesRes.value.data;
+      if (expensesRes.status === 'fulfilled' && expensesRes.value.data) result.expenses = expensesRes.value.data;
+      if (offersRes.status === 'fulfilled' && offersRes.value.data) result.offers = offersRes.value.data;
+      if (couponsRes.status === 'fulfilled' && couponsRes.value.data) result.coupons = couponsRes.value.data;
+      if (packsRes.status === 'fulfilled' && packsRes.value.data) result.school_packs = packsRes.value.data;
+      if (listsRes.status === 'fulfilled' && listsRes.value.data) result.school_lists = listsRes.value.data;
+      if (suppliersRes.status === 'fulfilled' && suppliersRes.value.data) result.suppliers = suppliersRes.value.data;
+      if (registersRes.status === 'fulfilled' && registersRes.value.data) result.cash_registers = registersRes.value.data;
+      if (movementsRes.status === 'fulfilled' && movementsRes.value.data) result.cash_movements = movementsRes.value.data;
+      if (invRes.status === 'fulfilled' && invRes.value.data) result.inventory_movements = invRes.value.data;
+      if (scansRes.status === 'fulfilled' && scansRes.value.data) result.ai_scans = scansRes.value.data;
+      if (logsRes.status === 'fulfilled' && logsRes.value.data) result.activity_logs = logsRes.value.data;
+
+      return Object.keys(result).length > 0 ? result : null;
+    } catch (err) {
+      console.warn('Error fetching bootstrap data directly from Supabase:', err);
+      return null;
+    }
+  },
+
   // Products
   async getProducts(): Promise<Product[]> {
     if (!supabase) return [];
@@ -756,6 +877,17 @@ export const supabaseDbService = {
     }
   },
 
+  async deleteCategory(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('categories').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteCategory error:', err);
+      return false;
+    }
+  },
+
   // Orders
   async getOrders(): Promise<Order[]> {
     if (!supabase) return [];
@@ -772,7 +904,7 @@ export const supabaseDbService = {
   async createOrder(order: Partial<Order>): Promise<Order | null> {
     if (!supabase) return null;
     try {
-      const { data, error } = await supabase.from('orders').insert(order).select().single();
+      const { data, error } = await supabase.from('orders').upsert(order).select().single();
       if (error) throw error;
       return data as Order;
     } catch (err) {
@@ -794,7 +926,18 @@ export const supabaseDbService = {
     }
   },
 
-  // Sales
+  async deleteOrder(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('orders').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteOrder error:', err);
+      return false;
+    }
+  },
+
+  // Sales (POS & Counter)
   async getSales(): Promise<Sale[]> {
     if (!supabase) return [];
     try {
@@ -810,12 +953,23 @@ export const supabaseDbService = {
   async createSale(sale: Partial<Sale>): Promise<Sale | null> {
     if (!supabase) return null;
     try {
-      const { data, error } = await supabase.from('sales').insert(sale).select().single();
+      const { data, error } = await supabase.from('sales').upsert(sale).select().single();
       if (error) throw error;
       return data as Sale;
     } catch (err) {
       console.error('Supabase createSale error:', err);
       return null;
+    }
+  },
+
+  async deleteSale(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('sales').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteSale error:', err);
+      return false;
     }
   },
 
@@ -829,6 +983,29 @@ export const supabaseDbService = {
     } catch (err) {
       console.error('Supabase getServices error:', err);
       return [];
+    }
+  },
+
+  async saveService(service: Partial<ServiceItem>): Promise<ServiceItem | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('services').upsert(service).select().single();
+      if (error) throw error;
+      return data as ServiceItem;
+    } catch (err) {
+      console.error('Supabase saveService error:', err);
+      return null;
+    }
+  },
+
+  async deleteService(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('services').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteService error:', err);
+      return false;
     }
   },
 
@@ -848,7 +1025,7 @@ export const supabaseDbService = {
   async createExpense(expense: Partial<Expense>): Promise<Expense | null> {
     if (!supabase) return null;
     try {
-      const { data, error } = await supabase.from('expenses').insert(expense).select().single();
+      const { data, error } = await supabase.from('expenses').upsert(expense).select().single();
       if (error) throw error;
       return data as Expense;
     } catch (err) {
@@ -857,11 +1034,326 @@ export const supabaseDbService = {
     }
   },
 
+  async deleteExpense(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('expenses').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteExpense error:', err);
+      return false;
+    }
+  },
+
+  // Offers
+  async getOffers(): Promise<Offer[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('offers').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Offer[];
+    } catch (err) {
+      console.error('Supabase getOffers error:', err);
+      return [];
+    }
+  },
+
+  async saveOffer(offer: Partial<Offer>): Promise<Offer | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('offers').upsert(offer).select().single();
+      if (error) throw error;
+      return data as Offer;
+    } catch (err) {
+      console.error('Supabase saveOffer error:', err);
+      return null;
+    }
+  },
+
+  async deleteOffer(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('offers').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteOffer error:', err);
+      return false;
+    }
+  },
+
+  // Coupons
+  async getCoupons(): Promise<Coupon[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Coupon[];
+    } catch (err) {
+      console.error('Supabase getCoupons error:', err);
+      return [];
+    }
+  },
+
+  async saveCoupon(coupon: Partial<Coupon>): Promise<Coupon | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('coupons').upsert(coupon).select().single();
+      if (error) throw error;
+      return data as Coupon;
+    } catch (err) {
+      console.error('Supabase saveCoupon error:', err);
+      return null;
+    }
+  },
+
+  async deleteCoupon(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('coupons').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteCoupon error:', err);
+      return false;
+    }
+  },
+
+  // School Packs
+  async getSchoolPacks(): Promise<SchoolPack[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('school_packs').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as SchoolPack[];
+    } catch (err) {
+      console.error('Supabase getSchoolPacks error:', err);
+      return [];
+    }
+  },
+
+  async saveSchoolPack(pack: Partial<SchoolPack>): Promise<SchoolPack | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('school_packs').upsert(pack).select().single();
+      if (error) throw error;
+      return data as SchoolPack;
+    } catch (err) {
+      console.error('Supabase saveSchoolPack error:', err);
+      return null;
+    }
+  },
+
+  async deleteSchoolPack(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('school_packs').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteSchoolPack error:', err);
+      return false;
+    }
+  },
+
+  // School Lists
+  async getSchoolLists(): Promise<SchoolList[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('school_lists').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as SchoolList[];
+    } catch (err) {
+      console.error('Supabase getSchoolLists error:', err);
+      return [];
+    }
+  },
+
+  async saveSchoolList(list: Partial<SchoolList>): Promise<SchoolList | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('school_lists').upsert(list).select().single();
+      if (error) throw error;
+      return data as SchoolList;
+    } catch (err) {
+      console.error('Supabase saveSchoolList error:', err);
+      return null;
+    }
+  },
+
+  async deleteSchoolList(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('school_lists').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteSchoolList error:', err);
+      return false;
+    }
+  },
+
+  // Cash Registers & Movements
+  async getCashRegisters(): Promise<CashRegister[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('cash_registers').select('*').order('opened_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as CashRegister[];
+    } catch (err) {
+      console.error('Supabase getCashRegisters error:', err);
+      return [];
+    }
+  },
+
+  async saveCashRegister(register: Partial<CashRegister>): Promise<CashRegister | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('cash_registers').upsert(register).select().single();
+      if (error) throw error;
+      return data as CashRegister;
+    } catch (err) {
+      console.error('Supabase saveCashRegister error:', err);
+      return null;
+    }
+  },
+
+  async getCashMovements(): Promise<CashMovement[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('cash_movements').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as CashMovement[];
+    } catch (err) {
+      console.error('Supabase getCashMovements error:', err);
+      return [];
+    }
+  },
+
+  async addCashMovement(movement: Partial<CashMovement>): Promise<CashMovement | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('cash_movements').upsert(movement).select().single();
+      if (error) throw error;
+      return data as CashMovement;
+    } catch (err) {
+      console.error('Supabase addCashMovement error:', err);
+      return null;
+    }
+  },
+
+  // Inventory Movements (Kardex)
+  async getInventoryMovements(): Promise<InventoryMovement[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('inventory_movements').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as InventoryMovement[];
+    } catch (err) {
+      console.error('Supabase getInventoryMovements error:', err);
+      return [];
+    }
+  },
+
+  async addInventoryMovement(movement: Partial<InventoryMovement>): Promise<InventoryMovement | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('inventory_movements').upsert(movement).select().single();
+      if (error) throw error;
+      return data as InventoryMovement;
+    } catch (err) {
+      console.error('Supabase addInventoryMovement error:', err);
+      return null;
+    }
+  },
+
+  // Suppliers
+  async getSuppliers(): Promise<Supplier[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('suppliers').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as Supplier[];
+    } catch (err) {
+      console.error('Supabase getSuppliers error:', err);
+      return [];
+    }
+  },
+
+  async saveSupplier(supplier: Partial<Supplier>): Promise<Supplier | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('suppliers').upsert(supplier).select().single();
+      if (error) throw error;
+      return data as Supplier;
+    } catch (err) {
+      console.error('Supabase saveSupplier error:', err);
+      return null;
+    }
+  },
+
+  async deleteSupplier(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('suppliers').delete().eq('id', id);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteSupplier error:', err);
+      return false;
+    }
+  },
+
+  // AI Scans
+  async getAiScans(): Promise<AiScanRecord[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('ai_scans').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as AiScanRecord[];
+    } catch (err) {
+      console.error('Supabase getAiScans error:', err);
+      return [];
+    }
+  },
+
+  async addAiScan(scan: Partial<AiScanRecord>): Promise<AiScanRecord | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('ai_scans').upsert(scan).select().single();
+      if (error) throw error;
+      return data as AiScanRecord;
+    } catch (err) {
+      console.error('Supabase addAiScan error:', err);
+      return null;
+    }
+  },
+
+  // Activity Logs
+  async getActivityLogs(): Promise<ActivityLog[]> {
+    if (!supabase) return [];
+    try {
+      const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as ActivityLog[];
+    } catch (err) {
+      console.error('Supabase getActivityLogs error:', err);
+      return [];
+    }
+  },
+
+  async logActivity(log: Partial<ActivityLog>): Promise<ActivityLog | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from('activity_logs').upsert(log).select().single();
+      if (error) throw error;
+      return data as ActivityLog;
+    } catch (err) {
+      console.error('Supabase logActivity error:', err);
+      return null;
+    }
+  },
+
   // Settings
   async getSettings(): Promise<StoreSettings | null> {
     if (!supabase) return null;
     try {
-      const { data, error } = await supabase.from('store_settings').select('*').eq('id', 1).single();
+      const { data, error } = await supabase.from('store_settings').select('*').eq('id', 1).maybeSingle();
       if (error) throw error;
       return data as StoreSettings;
     } catch (err) {
@@ -873,7 +1365,7 @@ export const supabaseDbService = {
   async updateSettings(settings: Partial<StoreSettings>): Promise<boolean> {
     if (!supabase) return false;
     try {
-      const { error } = await supabase.from('store_settings').update(settings).eq('id', 1);
+      const { error } = await supabase.from('store_settings').upsert({ id: 1, ...settings, updated_at: new Date().toISOString() });
       return !error;
     } catch (err) {
       console.error('Supabase updateSettings error:', err);

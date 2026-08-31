@@ -19,15 +19,17 @@ import {
   Send,
   CheckCircle2,
 } from 'lucide-react';
-import { CartItem, Coupon, Order, StoreSettings, UserProfile } from '../types';
+import { CartItem, Coupon, Order, StoreSettings, UserProfile, Offer } from '../types';
 import { formatXAF, formatDate } from '../utils/formatters';
 import { storageService } from '../lib/storage';
+import { calculateCartPricing } from '../lib/promotions';
 
 interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   items?: CartItem[];
   cart?: CartItem[];
+  offers?: Offer[];
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onRemoveItem: (productId: string) => void;
   onClearCart?: () => void;
@@ -48,6 +50,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onClose,
   items,
   cart,
+  offers = [],
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
@@ -59,7 +62,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   usePoints = false,
   onToggleUsePoints,
   settings,
-  onOpenInvoiceModal,
 }) => {
   const effectiveItems = items || cart || [];
   const storeSettings: StoreSettings = settings || storageService.getSettings();
@@ -78,26 +80,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   if (!isOpen) return null;
 
-  const subtotal = effectiveItems.reduce((sum, item) => sum + item.product.sale_price * item.quantity, 0);
-
-  // Calculate coupon discount
-  let couponDiscount = 0;
-  if (appliedCoupon) {
-    if (appliedCoupon.discount_type === 'percentage') {
-      couponDiscount = Math.round((subtotal * appliedCoupon.discount_value) / 100);
-    } else {
-      couponDiscount = appliedCoupon.discount_value;
-    }
-  }
-
-  // Calculate points discount (1 point = 5 XAF, max 50% of subtotal or user points)
   const userPoints = currentUser?.points || 0;
-  const maxPointsToUse = Math.min(userPoints, Math.floor(subtotal / 10));
-  const pointsDiscount = usePoints ? maxPointsToUse * 5 : 0;
+  const pricing = calculateCartPricing(
+    effectiveItems,
+    offers,
+    appliedCoupon,
+    usePoints,
+    userPoints,
+    deliveryType
+  );
 
-  const deliveryCost = deliveryType === 'delivery' ? 1500 : 0;
-  const totalDiscount = couponDiscount + pointsDiscount;
-  const total = Math.max(0, subtotal - totalDiscount + deliveryCost);
+  const subtotal = pricing.subtotal;
+  const totalDiscount = pricing.totalDiscount;
+  const deliveryCost = pricing.deliveryCost;
+  const total = pricing.finalTotal;
 
   const handleApplyCoupon = (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,14 +188,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         user_name: cleanName,
         user_role: 'customer',
         action: 'Envió un nuevo pedido desde el Carrito',
-        details: `Pedido #${orderCode} por ${formatXAF(total)}. Pendiente de cobro y envío de factura por WhatsApp.`,
+        details: `Pedido #${orderCode} por ${formatXAF(total)}. Pendiente de cobro y confirmación de la tienda.`,
       });
 
       // 5. Add Notification for Admin
       storageService.addNotification({
         target: 'admin',
         title: `Nuevo Pedido ${orderCode}`,
-        message: `${cleanName} envió un pedido de ${formatXAF(total)}. Revisa y envía la factura tras cobrar.`,
+        message: `${cleanName} envió un pedido de ${formatXAF(total)}.`,
         type: 'order',
       });
 
@@ -305,27 +301,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             </div>
 
             {/* Action buttons */}
-            <div className="w-full space-y-2.5 pt-2">
-              {onOpenInvoiceModal && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenInvoiceModal(submittedOrder);
-                  }}
-                  className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-                >
-                  <FileText className="w-4 h-4 text-red-400" />
-                  <span>Ver / Imprimir Ticket del Pedido</span>
-                </button>
-              )}
-
+            <div className="w-full pt-2">
               <button
                 type="button"
                 onClick={() => {
                   setSubmittedOrder(null);
                   onClose();
                 }}
-                className="w-full py-3 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-red-200"
+                className="w-full py-3.5 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-red-200"
               >
                 <span>Aceptar y Seguir Comprando</span>
               </button>
@@ -556,10 +539,22 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <span>Subtotal</span>
                   <span>{formatXAF(subtotal)}</span>
                 </div>
-                {couponDiscount > 0 && (
+                {pricing.offersDiscount > 0 && (
+                  <div className="flex justify-between text-amber-600 font-semibold">
+                    <span>Ofertas y Promociones</span>
+                    <span>-{formatXAF(pricing.offersDiscount)}</span>
+                  </div>
+                )}
+                {pricing.couponDiscount > 0 && (
                   <div className="flex justify-between text-emerald-600 font-semibold">
                     <span>Descuento cupón</span>
-                    <span>-{formatXAF(couponDiscount)}</span>
+                    <span>-{formatXAF(pricing.couponDiscount)}</span>
+                  </div>
+                )}
+                {pricing.pointsDiscount > 0 && (
+                  <div className="flex justify-between text-indigo-600 font-semibold">
+                    <span>Descuento Puntos BIKIE</span>
+                    <span>-{formatXAF(pricing.pointsDiscount)}</span>
                   </div>
                 )}
                 {deliveryCost > 0 && (

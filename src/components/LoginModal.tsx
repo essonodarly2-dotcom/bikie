@@ -10,24 +10,15 @@ import {
   AlertCircle,
   X,
   LogOut,
-  Database,
   CheckCircle2,
-  Code2,
-  Copy,
-  Check,
-  Terminal,
-  ChevronDown,
-  ChevronUp,
   Mail,
   ArrowLeft,
 } from 'lucide-react';
 import { UserProfile } from '../types';
-import { api } from '../lib/api';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   loginSchema,
   passwordRecoverySchema,
-  adminCodeGeneratorSchema,
   sanitizeString,
 } from '../lib/validations';
 
@@ -35,7 +26,6 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserProfile;
-  availableUsers?: UserProfile[];
   onLoginSuccess: (user: UserProfile) => void;
   onLogoutToGuest: () => void;
 }
@@ -54,17 +44,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [showDbCodeGenerator, setShowDbCodeGenerator] = useState(false);
-
-  // DB User Generator State (Single Admin Only)
-  const [genName, setGenName] = useState('María Lidia (Propietaria)');
-  const [genEmail, setGenEmail] = useState('marialidia@bikie.gq');
-  const [genPhone, setGenPhone] = useState('+240 222 213 126');
-  const [genPass, setGenPass] = useState('1234');
-  const [generatedSql, setGeneratedSql] = useState<string>('');
-  const [generatedJson, setGeneratedJson] = useState<string>('');
-  const [copiedType, setCopiedType] = useState<'sql' | 'json' | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -73,54 +52,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setMode('login');
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (showDbCodeGenerator && !generatedSql) {
-      handleGenerateCode();
-    }
-  }, [showDbCodeGenerator]);
-
-  const handleGenerateCode = async () => {
-    setError(null);
-    const validation = adminCodeGeneratorSchema.safeParse({
-      name: sanitizeString(genName),
-      email: sanitizeString(genEmail),
-      phone: sanitizeString(genPhone),
-      password: genPass,
-    });
-
-    if (!validation.success) {
-      setError(validation.error.issues[0]?.message || 'Datos del administrador inválidos');
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const res = await api.generateUserCode({
-        name: validation.data.name,
-        email: validation.data.email,
-        phone: validation.data.phone,
-        role: 'admin',
-        password: validation.data.password,
-        points: 2500,
-      });
-
-      if (res.success && res.sql && res.json) {
-        setGeneratedSql(res.sql);
-        setGeneratedJson(res.json);
-      }
-    } catch (err) {
-      console.error('Error generating user creation code:', err);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const copyToClipboard = (text: string, type: 'sql' | 'json') => {
-    navigator.clipboard.writeText(text);
-    setCopiedType(type);
-    setTimeout(() => setCopiedType(null), 2000);
-  };
 
   if (!isOpen) return null;
 
@@ -147,99 +78,111 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const cleanPassword = validation.data.password;
 
     try {
-      // 1. If Supabase Auth is configured, try Supabase Auth first
-      if (isSupabaseConfigured && supabase) {
-        try {
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password: cleanPassword,
-          });
-
-          if (!authError && authData.user) {
-            const adminUser: UserProfile = {
-              id: authData.user.id,
-              email: authData.user.email || cleanEmail,
-              name: authData.user.user_metadata?.name || 'María Lidia (Administradora)',
-              phone: authData.user.user_metadata?.phone || '+240 222 213 126',
-              role: 'admin',
-              points: 2500,
-              created_at: authData.user.created_at || new Date().toISOString(),
-            };
-            onLoginSuccess(adminUser);
-            setIsLoading(false);
-            onClose();
-            return;
-          }
-        } catch (sbErr) {
-          console.warn('Supabase Auth attempt fallback to DB verification:', sbErr);
-        }
-      }
-
-      // 2. Direct call to Database Backend Authentication with strict DB PBKDF2 check & rate limiting
-      const result = await api.login(cleanEmail, cleanPassword);
-
-      if (result.success && result.user) {
-        onLoginSuccess(result.user);
+      if (!isSupabaseConfigured || !supabase) {
+        setError('Supabase no está configurado. Por favor define VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en las variables de entorno.');
         setIsLoading(false);
-        onClose();
-      } else {
-        // Resilient Fallback: If network/server is starting or temporarily offline, verify against valid admin credentials
-        const isAdminMatch =
-          (cleanEmail === 'admin@bikie.gq' ||
-            cleanEmail === 'marialidia@bikie.gq' ||
-            cleanEmail === 'propietaria@bikie.gq' ||
-            cleanEmail === 'admin' ||
-            cleanEmail.includes('marialidia')) &&
-          (cleanPassword === '1234' || cleanPassword === 'admin' || cleanPassword.length >= 4);
-
-        if (isAdminMatch) {
-          const adminUser: UserProfile = {
-            id: 'usr-admin-marialidia',
-            email: cleanEmail.includes('@') ? cleanEmail : 'admin@bikie.gq',
-            name: 'María Lidia (Administradora)',
-            phone: '+240 222 213 126',
-            role: 'admin',
-            points: 2500,
-            created_at: new Date().toISOString(),
-          };
-          onLoginSuccess(adminUser);
-          setIsLoading(false);
-          onClose();
-          return;
-        }
-
-        setError(result.error || 'Credenciales inválidas. Verifica tu correo y contraseña registrados.');
-        setIsLoading(false);
-      }
-    } catch (err: any) {
-      console.error('Error logging in:', err);
-      // Resilient Fallback on network catch
-      const cleanEmail = sanitizeString(email).toLowerCase();
-      const cleanPassword = pin.trim();
-      const isAdminMatch =
-        (cleanEmail === 'admin@bikie.gq' ||
-          cleanEmail === 'marialidia@bikie.gq' ||
-          cleanEmail === 'propietaria@bikie.gq' ||
-          cleanEmail === 'admin') &&
-        (cleanPassword === '1234' || cleanPassword === 'admin' || cleanPassword.length >= 4);
-
-      if (isAdminMatch) {
-        const adminUser: UserProfile = {
-          id: 'usr-admin-marialidia',
-          email: cleanEmail.includes('@') ? cleanEmail : 'admin@bikie.gq',
-          name: 'María Lidia (Administradora)',
-          phone: '+240 222 213 126',
-          role: 'admin',
-          points: 2500,
-          created_at: new Date().toISOString(),
-        };
-        onLoginSuccess(adminUser);
-        setIsLoading(false);
-        onClose();
         return;
       }
 
-      setError('No se pudo conectar con el servidor de base de datos. Verifica tus credenciales (ej. admin@bikie.gq / 1234).');
+      // Supabase Auth Direct Sign In
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPassword,
+      });
+
+      if (authError || !authData.user) {
+        let errorMsg = authError?.message || 'Error al autenticar con Supabase.';
+        if (authError?.message?.includes('Invalid login credentials')) {
+          errorMsg = 'Credenciales incorrectas. Verifica tu correo y contraseña registrados en Supabase.';
+        } else if (authError?.message?.includes('Database error querying schema') || authError?.message?.includes('Database error')) {
+          errorMsg = 'Error en el esquema de Supabase Auth (Database error querying schema). Si creaste el usuario mediante SQL directo, por favor créalo desde la pestaña Authentication > Users de Supabase para generar las identidades internas de GoTrue correctamente.';
+        }
+        setError(errorMsg);
+        setIsLoading(false);
+        return;
+      }
+
+      // Fetch user profile from public.profiles table using user ID or email
+      let profileData: any = null;
+      try {
+        // Try searching by ID
+        const { data: pDataById, error: pErrorById } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+
+        if (!pErrorById && pDataById) {
+          profileData = pDataById;
+        } else if (authData.user.email) {
+          // Fallback search by email in case profile was created with a custom id
+          const { data: pDataByEmail } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('email', authData.user.email)
+            .maybeSingle();
+
+          if (pDataByEmail) {
+            profileData = pDataByEmail;
+          }
+        }
+      } catch (profileErr) {
+        console.warn('Error fetching profile:', profileErr);
+      }
+
+      // Check role in profileData, or user_metadata, or app_metadata
+      let userRole = 
+        profileData?.role || 
+        authData.user.user_metadata?.role || 
+        (authData.user.app_metadata as any)?.role;
+
+      // If user profile is not found or not marked as admin, check if email matches admin email
+      if (userRole !== 'admin') {
+        await supabase.auth.signOut();
+        setError('Acceso denegado: este usuario no tiene el rol "admin" en la tabla "public.profiles" ni en sus metadatos de Supabase Auth.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Auto-sync profile to ensure public.profiles has this user with role=admin
+      if (!profileData) {
+        try {
+          const { data: newProfile } = await supabase
+            .from('profiles')
+            .upsert({
+              id: authData.user.id,
+              email: authData.user.email || cleanEmail,
+              name: authData.user.user_metadata?.name || 'María Lidia (Propietaria)',
+              phone: authData.user.user_metadata?.phone || '+240 222 213 126',
+              role: 'admin',
+              points: 2500,
+            })
+            .select()
+            .maybeSingle();
+          if (newProfile) {
+            profileData = newProfile;
+          }
+        } catch (upsertErr) {
+          console.warn('Could not auto-upsert admin profile:', upsertErr);
+        }
+      }
+
+      const adminUser: UserProfile = {
+        id: authData.user.id,
+        email: authData.user.email || cleanEmail,
+        name: profileData?.name || authData.user.user_metadata?.name || 'Administradora BIKIE',
+        phone: profileData?.phone || authData.user.user_metadata?.phone || '+240 222 213 126',
+        role: 'admin',
+        points: profileData?.points || 0,
+        created_at: profileData?.created_at || authData.user.created_at || new Date().toISOString(),
+      };
+
+      onLoginSuccess(adminUser);
+      setIsLoading(false);
+      onClose();
+    } catch (err: any) {
+      console.error('Error logging in with Supabase Auth:', err);
+      setError(err?.message || 'Error inesperado al conectar con Supabase Auth. Intenta nuevamente.');
       setIsLoading(false);
     }
   };
@@ -276,7 +219,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header with Red & Black Theme */}
         <div className="bg-slate-950 text-white p-5 sm:p-6 relative border-b border-red-900/30 shrink-0">
           <button
@@ -314,7 +257,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-50 rounded-xl text-[11px] font-medium text-slate-600 border border-slate-200">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span className="font-semibold text-slate-700">Supabase Auth · Anti-Fuerza Bruta & RLS</span>
+              <span className="font-semibold text-slate-700">Supabase Auth · auth.users</span>
             </div>
             <div className="flex items-center gap-1.5 font-bold text-emerald-700">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -353,7 +296,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start gap-2.5 text-xs text-slate-600">
               <Lock className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <span>
-                Ingresa con tu correo y contraseña registrados directamente en la base de datos de Supabase. Acceso exclusivo para la administradora.
+                Ingresa con tu correo y contraseña registrados en Supabase Auth. Acceso exclusivo para la administradora.
               </span>
             </div>
           )}
@@ -361,38 +304,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           {/* Mode 1: LOGIN FORM */}
           {mode === 'login' ? (
             <form onSubmit={handleFormSubmit} className="space-y-3.5">
-              {/* Quick Preset Buttons for Owner / Admin */}
-              <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 flex flex-col gap-1.5 text-xs text-amber-900">
-                <span className="font-bold flex items-center gap-1.5 text-amber-800">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-                  Credenciales de acceso rápido (Administración):
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('admin@bikie.gq');
-                      setPin('1234');
-                      setError(null);
-                    }}
-                    className="px-2.5 py-1 bg-white hover:bg-amber-100/60 border border-amber-300 rounded-lg text-[11px] font-bold text-amber-900 transition-colors cursor-pointer shadow-2xs"
-                  >
-                    admin@bikie.gq (PIN: 1234)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('marialidia@bikie.gq');
-                      setPin('1234');
-                      setError(null);
-                    }}
-                    className="px-2.5 py-1 bg-white hover:bg-amber-100/60 border border-amber-300 rounded-lg text-[11px] font-bold text-amber-900 transition-colors cursor-pointer shadow-2xs"
-                  >
-                    marialidia@bikie.gq (PIN: 1234)
-                  </button>
-                </div>
-              </div>
-
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Correo Electrónico (Administradora)
@@ -463,7 +374,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   {isLoading ? (
                     <span className="flex items-center gap-2">
                       <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                      <span>Validando en Base de Datos...</span>
+                      <span>Validando con Supabase Auth...</span>
                     </span>
                   ) : (
                     <>
@@ -538,110 +449,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             </form>
           )}
-
-          {/* Database User Creation Code (SQL / JSON) Accordion */}
-          <div className="border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
-            <button
-              type="button"
-              onClick={() => setShowDbCodeGenerator(!showDbCodeGenerator)}
-              className="w-full px-4 py-3 bg-slate-100 hover:bg-slate-200/80 text-slate-800 flex items-center justify-between text-xs font-bold transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-red-600" />
-                <span>Generador SQL de Usuario Administrador para Supabase</span>
-              </div>
-              {showDbCodeGenerator ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-
-            {showDbCodeGenerator && (
-              <div className="p-4 space-y-4 border-t border-slate-200 bg-white text-xs">
-                <p className="text-slate-600 leading-relaxed text-[11px]">
-                  Copia estas sentencias SQL para crear o resetear la cuenta de la propietaria en el Editor SQL de Supabase:
-                </p>
-
-                {/* Generator Form */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">Nombre</label>
-                    <input
-                      type="text"
-                      value={genName}
-                      onChange={(e) => setGenName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">Correo Electrónico</label>
-                    <input
-                      type="email"
-                      value={genEmail}
-                      onChange={(e) => setGenEmail(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">Teléfono</label>
-                    <input
-                      type="text"
-                      value={genPhone}
-                      onChange={(e) => setGenPhone(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">Contraseña / PIN</label>
-                    <input
-                      type="text"
-                      value={genPass}
-                      onChange={(e) => setGenPass(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
-                    />
-                  </div>
-                  <div className="sm:col-span-2 flex items-center justify-between pt-1">
-                    <span className="text-[10px] font-bold text-red-600">Rol: Administradora Única</span>
-                    <button
-                      type="button"
-                      onClick={handleGenerateCode}
-                      disabled={isGenerating}
-                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
-                    >
-                      {isGenerating ? 'Generando...' : 'Generar SQL'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* SQL Code Block */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-700 flex items-center gap-1.5 text-[11px]">
-                      <Terminal className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Sentencia SQL para Supabase Auth:</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(generatedSql, 'sql')}
-                      className="flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md transition-colors cursor-pointer"
-                    >
-                      {copiedType === 'sql' ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          <span className="text-emerald-700">¡Copiado!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>Copiar SQL</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <pre className="p-3 bg-slate-950 text-slate-200 rounded-xl overflow-x-auto text-[10px] font-mono leading-relaxed border border-slate-800">
-                    {generatedSql || 'Generando consulta SQL...'}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>
